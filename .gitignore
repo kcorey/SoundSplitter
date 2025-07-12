@@ -1,0 +1,43 @@
+# Generated analysis files
+*_applause_analysis.json
+
+# Build artifacts
+ui_server
+applause_detector
+*.exe
+
+# Extracted video segments
+extracted/
+
+# Large media files
+*.MOV
+*.mov
+*.mp4
+*.avi
+*.mkv
+
+# Python virtual environment
+face_recognition_env/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp 
