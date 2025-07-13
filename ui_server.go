@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/unidoc/unipdf/v3/extractor"
+	"github.com/unidoc/unipdf/v3/model"
 )
 
 type VideoAnalysis struct {
@@ -170,7 +173,26 @@ func handlePresenters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Find PDF files
+	// Try to load presenters from the JSON file first
+	jsonFile := "extracted_presenters.json"
+	if _, err := os.Stat(jsonFile); err == nil {
+		// JSON file exists, load from it
+		data, err := os.ReadFile(jsonFile)
+		if err != nil {
+			log.Printf("Error reading JSON file: %v", err)
+		} else {
+			var presenters []Presenter
+			if err := json.Unmarshal(data, &presenters); err != nil {
+				log.Printf("Error parsing JSON: %v", err)
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(presenters)
+				return
+			}
+		}
+	}
+
+	// Fallback: Find PDF files and try to parse them
 	pdfFiles, err := findPDFFiles(".")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error finding PDF files: %v", err), http.StatusInternalServerError)
@@ -268,15 +290,49 @@ func findPDFFiles(dir string) ([]string, error) {
 }
 
 func parsePDFPresenters(pdfFile string) ([]Presenter, error) {
-	// Use pdftotext -layout to extract text from PDF preserving table structure
-	cmd := exec.Command("pdftotext", "-layout", pdfFile, "-")
-	output, err := cmd.CombinedOutput()
+	// Open the PDF file
+	file, err := os.Open(pdfFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract text from PDF: %v", err)
+		return nil, fmt.Errorf("failed to open PDF file: %v", err)
+	}
+	defer file.Close()
+
+	reader, err := model.NewPdfReader(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create PDF reader: %v", err)
 	}
 
-	text := string(output)
-	return extractPresentersFromText(text)
+	// Get the number of pages
+	numPages, err := reader.GetNumPages()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get page count: %v", err)
+	}
+
+	var allText string
+	// Extract text from all pages
+	for i := 1; i <= numPages; i++ {
+		page, err := reader.GetPage(i)
+		if err != nil {
+			log.Printf("Error getting page %d: %v", i, err)
+			continue
+		}
+
+		ex, err := extractor.New(page)
+		if err != nil {
+			log.Printf("Error creating extractor for page %d: %v", i, err)
+			continue
+		}
+
+		text, err := ex.ExtractText()
+		if err != nil {
+			log.Printf("Error extracting text from page %d: %v", i, err)
+			continue
+		}
+
+		allText += text + "\n"
+	}
+
+	return extractPresentersFromText(allText)
 }
 
 func extractPresentersFromText(text string) ([]Presenter, error) {

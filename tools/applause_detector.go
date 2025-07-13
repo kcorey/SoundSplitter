@@ -13,19 +13,6 @@ import (
 	"sync"
 )
 
-type ApplauseSegment struct {
-	StartTime  string  `json:"start_time"`
-	EndTime    string  `json:"end_time"`
-	Duration   string  `json:"duration"`
-	Confidence float64 `json:"confidence"`
-	Selected   bool    `json:"selected"`
-}
-
-type VideoAnalysis struct {
-	Filename string            `json:"filename"`
-	Segments []ApplauseSegment `json:"applause_segments"`
-}
-
 type VolumePoint struct {
 	Time   float64
 	Volume float64
