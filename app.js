@@ -21,9 +21,15 @@ class SoundSplitterUI {
         this.isExtracting = false;
         this.shouldStopExtraction = false;
         
+        // Undo system
+        this.actionStack = [];
+        this.maxUndoActions = 20; // Maximum number of actions to remember
+        
         this.initializeEventListeners();
         this.loadAnalyzedFiles();
         this.loadPresenters();
+        this.loadDetectedToastmaster();
+        this.initializeSensitivitySlider();
     }
 
     initializeEventListeners() {
@@ -38,6 +44,14 @@ class SoundSplitterUI {
         // Video player event listeners
         this.videoPlayer.addEventListener('ended', () => {
             this.currentSegment.textContent = 'Video playback ended';
+        });
+        
+        // Keyboard shortcuts for undo
+        document.addEventListener('keydown', (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+                e.preventDefault();
+                this.undoLastAction();
+            }
         });
     }
 
@@ -1116,6 +1130,14 @@ class SoundSplitterUI {
             tags: []
         };
 
+        // Record the action for undo
+        this.recordAction({
+            type: 'add_segment',
+            filename: filename,
+            index: index + 1,
+            segment: JSON.parse(JSON.stringify(newSegment)) // Deep copy
+        });
+
         // Insert the new segment
         file.applause_segments.splice(index + 1, 0, newSegment);
         
@@ -1135,6 +1157,14 @@ class SoundSplitterUI {
     removeSegment(filename, index) {
         const file = this.analyzedFiles.find(f => f.filename === filename);
         if (!file || !file.applause_segments[index]) return;
+
+        // Record the action for undo
+        this.recordAction({
+            type: 'remove_segment',
+            filename: filename,
+            index: index,
+            segment: JSON.parse(JSON.stringify(file.applause_segments[index])) // Deep copy
+        });
 
         file.applause_segments.splice(index, 1);
         this.renderFileList();
@@ -1359,6 +1389,63 @@ class SoundSplitterUI {
                 </div>
             `;
         }
+    }
+    
+    // Undo system methods
+    recordAction(action) {
+        this.actionStack.push(action);
+        
+        // Keep only the last maxUndoActions
+        if (this.actionStack.length > this.maxUndoActions) {
+            this.actionStack.shift();
+        }
+    }
+    
+    undoLastAction() {
+        if (this.actionStack.length === 0) {
+            console.log('No actions to undo');
+            return;
+        }
+        
+        const lastAction = this.actionStack.pop();
+        const file = this.analyzedFiles.find(f => f.filename === lastAction.filename);
+        
+        if (!file) {
+            console.log('File not found for undo:', lastAction.filename);
+            return;
+        }
+        
+        switch (lastAction.type) {
+            case 'add_segment':
+                // Remove the segment that was added
+                if (file.applause_segments[lastAction.index]) {
+                    file.applause_segments.splice(lastAction.index, 1);
+                    console.log('Undid add segment at index', lastAction.index);
+                }
+                break;
+                
+            case 'remove_segment':
+                // Reinsert the segment that was removed
+                file.applause_segments.splice(lastAction.index, 0, lastAction.segment);
+                console.log('Undid remove segment at index', lastAction.index);
+                break;
+                
+            default:
+                console.log('Unknown action type:', lastAction.type);
+                return;
+        }
+        
+        // Re-render the file list
+        this.renderFileList();
+        this.updateSplitButton();
+        
+        // Scroll to the affected area
+        requestAnimationFrame(() => {
+            const segmentElement = document.querySelector(`[data-filename="${lastAction.filename}"][data-index="${lastAction.index}"]`);
+            if (segmentElement) {
+                segmentElement.scrollIntoView({ behavior: 'instant', block: 'center' });
+            }
+        });
     }
 }
 
