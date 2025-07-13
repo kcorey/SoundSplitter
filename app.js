@@ -1120,6 +1120,15 @@ class SoundSplitterUI {
         file.applause_segments.splice(index + 1, 0, newSegment);
         
         this.renderFileList();
+        
+        // Scroll to the newly added segment instantly
+        requestAnimationFrame(() => {
+            const newSegmentElement = document.querySelector(`[data-filename="${filename}"][data-index="${index + 1}"]`);
+            if (newSegmentElement) {
+                newSegmentElement.scrollIntoView({ behavior: 'instant', block: 'center' });
+            }
+        });
+        
         this.updateSplitButton();
     }
 
@@ -1129,6 +1138,15 @@ class SoundSplitterUI {
 
         file.applause_segments.splice(index, 1);
         this.renderFileList();
+        
+        // Scroll to the segment that was after the removed one (now at the same index) instantly
+        requestAnimationFrame(() => {
+            const nextSegmentElement = document.querySelector(`[data-filename="${filename}"][data-index="${index}"]`);
+            if (nextSegmentElement) {
+                nextSegmentElement.scrollIntoView({ behavior: 'instant', block: 'center' });
+            }
+        });
+        
         this.updateSplitButton();
     }
 
@@ -1263,23 +1281,21 @@ class SoundSplitterUI {
     
     getSensitivityParameters(sensitivity) {
         // Map sensitivity 1-10 to detection parameters
+        // The backend now uses a single sensitivity parameter (1-10)
+        // Higher sensitivity = more detections, Lower sensitivity = fewer detections
         const params = {
-            minDuration: Math.max(1, 4 - sensitivity * 0.3), // 1.0 to 1.7 seconds
-            maxDuration: 20,
-            minVolumeChanges: Math.max(1, 3 - sensitivity * 0.2), // 1 to 1.8
-            minChangeDensity: Math.max(0.05, 0.2 - sensitivity * 0.015) // 0.05 to 0.05
+            sensitivity: sensitivity, // 1-10 scale
+            minDuration: Math.max(1, 4 - sensitivity * 0.3) // 1.0 to 1.7 seconds
         };
         
         return params;
     }
     
     async runApplauseDetection(params) {
-        // Run the applause detector with new parameters
+        // Run the applause detector with new sensitivity-based parameters
         const videoFiles = this.getVideoFiles();
         
         for (const videoFile of videoFiles) {
-            const command = `go run tools/applause_detector.go "${videoFile}" --min-duration ${params.minDuration} --min-volume-changes ${params.minVolumeChanges} --min-change-density ${params.minChangeDensity}`;
-            
             try {
                 // Use fetch to call a backend endpoint that will run the command
                 const response = await fetch('/api/run-detection', {
@@ -1297,7 +1313,7 @@ class SoundSplitterUI {
                     throw new Error('Detection failed');
                 }
                 
-                console.log('Detection completed for:', videoFile);
+                console.log('Detection completed for:', videoFile, 'with sensitivity:', params.sensitivity);
             } catch (error) {
                 console.error('Failed to run applause detection:', error);
             }

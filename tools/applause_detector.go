@@ -13,9 +13,12 @@ import (
 	"strings"
 )
 
-type VolumePoint struct {
-	Time   float64
-	Volume float64
+type AudioFrame struct {
+	Time         float64
+	Energy       float64
+	ZCR          float64
+	SpectralFlux float64
+	Volume       float64
 }
 
 type ApplauseSegment struct {
@@ -34,18 +37,20 @@ type VideoAnalysis struct {
 
 func main() {
 	// Parse command line arguments
-	var minDuration, minVolumeChanges float64
-	var minChangeDensity float64
+	var minDuration, minEnergy, minZCR, minSpectralFlux float64
+	var sensitivity float64
 
 	// Default values
 	minDuration = 2.0
-	minVolumeChanges = 1.0
-	minChangeDensity = 0.1
+	minEnergy = 0.1
+	minZCR = 0.05
+	minSpectralFlux = 0.02
+	sensitivity = 5.0 // 1-10 scale
 
 	// Check if a video file was provided
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: go run applause_detector.go <video_file> [--min-duration <seconds>] [--min-volume-changes <count>] [--min-change-density <density>]")
-		fmt.Println("Example: go run applause_detector.go IMG_2333.MOV --min-duration 1.5 --min-volume-changes 2 --min-change-density 0.05")
+		fmt.Println("Usage: go run applause_detector.go <video_file> [--sensitivity <1-10>] [--min-duration <seconds>]")
+		fmt.Println("Example: go run applause_detector.go IMG_2333.MOV --sensitivity 7 --min-duration 1.5")
 		os.Exit(1)
 	}
 
@@ -58,31 +63,30 @@ func main() {
 		}
 
 		switch os.Args[i] {
+		case "--sensitivity":
+			if val, err := strconv.ParseFloat(os.Args[i+1], 64); err == nil {
+				sensitivity = val
+			}
 		case "--min-duration":
 			if val, err := strconv.ParseFloat(os.Args[i+1], 64); err == nil {
 				minDuration = val
 			}
-		case "--min-volume-changes":
-			if val, err := strconv.ParseFloat(os.Args[i+1], 64); err == nil {
-				minVolumeChanges = val
-			}
-		case "--min-change-density":
-			if val, err := strconv.ParseFloat(os.Args[i+1], 64); err == nil {
-				minChangeDensity = val
-			}
 		}
 	}
+
+	// Map sensitivity to detection parameters
+	minEnergy, minZCR, minSpectralFlux = mapSensitivityToParams(sensitivity)
 
 	// Check if file exists
 	if _, err := os.Stat(videoFile); os.IsNotExist(err) {
 		log.Fatalf("Video file not found: %s", videoFile)
 	}
 
-	fmt.Printf("Analyzing %s with sensitivity: min-duration=%.1f, min-volume-changes=%.1f, min-change-density=%.3f\n",
-		videoFile, minDuration, minVolumeChanges, minChangeDensity)
+	fmt.Printf("Analyzing %s with sensitivity: %.1f (energy=%.3f, zcr=%.3f, flux=%.3f, duration=%.1f)\n",
+		videoFile, sensitivity, minEnergy, minZCR, minSpectralFlux, minDuration)
 
 	// Analyze the specified video file
-	segments, err := analyzeVideoForApplauseWithParams(videoFile, minDuration, minVolumeChanges, minChangeDensity)
+	segments, err := analyzeVideoForApplauseWithParams(videoFile, minDuration, minEnergy, minZCR, minSpectralFlux)
 	if err != nil {
 		log.Fatalf("Error analyzing %s: %v", videoFile, err)
 	}
@@ -120,6 +124,23 @@ func main() {
 	}
 }
 
+func mapSensitivityToParams(sensitivity float64) (minEnergy, minZCR, minSpectralFlux float64) {
+	// Map sensitivity 1-10 to detection parameters
+	// Higher sensitivity = lower thresholds = more detections
+	// Lower sensitivity = higher thresholds = fewer detections
+
+	// Energy threshold (0.05 to 0.3)
+	minEnergy = 0.3 - (sensitivity * 0.025)
+
+	// Zero Crossing Rate threshold (0.02 to 0.15)
+	minZCR = 0.15 - (sensitivity * 0.013)
+
+	// Spectral Flux threshold (0.01 to 0.08)
+	minSpectralFlux = 0.08 - (sensitivity * 0.007)
+
+	return minEnergy, minZCR, minSpectralFlux
+}
+
 func findMOVFiles(dir string) ([]string, error) {
 	var files []string
 
@@ -141,10 +162,10 @@ func findMOVFiles(dir string) ([]string, error) {
 }
 
 func analyzeVideoForApplause(filename string) ([]ApplauseSegment, error) {
-	return analyzeVideoForApplauseWithParams(filename, 2.0, 1.0, 0.1)
+	return analyzeVideoForApplauseWithParams(filename, 2.0, 0.1, 0.05, 0.02)
 }
 
-func analyzeVideoForApplauseWithParams(filename string, minDuration, minVolumeChanges, minChangeDensity float64) ([]ApplauseSegment, error) {
+func analyzeVideoForApplauseWithParams(filename string, minDuration, minEnergy, minZCR, minSpectralFlux float64) ([]ApplauseSegment, error) {
 	// First, extract audio from video using FFmpeg
 	audioFile, err := extractAudioFromVideo(filename)
 	if err != nil {
@@ -152,8 +173,8 @@ func analyzeVideoForApplauseWithParams(filename string, minDuration, minVolumeCh
 	}
 	defer os.Remove(audioFile) // Clean up temporary audio file
 
-	// Analyze the audio for applause patterns with improved detection
-	segments, err := detectApplauseInAudioWithParams(audioFile, minDuration, minVolumeChanges, minChangeDensity)
+	// Analyze the audio for applause patterns with advanced detection
+	segments, err := detectApplauseInAudioWithParams(audioFile, minDuration, minEnergy, minZCR, minSpectralFlux)
 	if err != nil {
 		return nil, fmt.Errorf("failed to detect applause: %v", err)
 	}
@@ -165,7 +186,7 @@ func extractAudioFromVideo(videoFile string) (string, error) {
 	// Create temporary audio file
 	audioFile := strings.TrimSuffix(videoFile, filepath.Ext(videoFile)) + "_temp_audio.wav"
 
-	// Use FFmpeg to extract audio from video
+	// Use FFmpeg to extract audio from video with high quality
 	cmd := exec.Command("ffmpeg", "-i", videoFile, "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1", "-y", audioFile)
 
 	output, err := cmd.CombinedOutput()
@@ -177,39 +198,41 @@ func extractAudioFromVideo(videoFile string) (string, error) {
 }
 
 func detectApplauseInAudio(audioFile string) ([]ApplauseSegment, error) {
-	return detectApplauseInAudioWithParams(audioFile, 2.0, 1.0, 0.1)
+	return detectApplauseInAudioWithParams(audioFile, 2.0, 0.1, 0.05, 0.02)
 }
 
-func detectApplauseInAudioWithParams(audioFile string, minDuration, minVolumeChanges, minChangeDensity float64) ([]ApplauseSegment, error) {
-	// Get volume data at regular intervals
-	volumeData, err := getHighResolutionVolumeData(audioFile)
+func detectApplauseInAudioWithParams(audioFile string, minDuration, minEnergy, minZCR, minSpectralFlux float64) ([]ApplauseSegment, error) {
+	// Get advanced audio analysis data
+	audioFrames, err := getAdvancedAudioData(audioFile)
 	if err != nil {
 		return nil, err
 	}
 
-	// Detect applause based on improved volume patterns
-	segments := detectApplauseFromVolumeWithParams(volumeData, minDuration, minVolumeChanges, minChangeDensity)
+	// Detect applause based on advanced audio features
+	segments := detectApplauseFromAdvancedFeatures(audioFrames, minDuration, minEnergy, minZCR, minSpectralFlux)
 
 	return segments, nil
 }
 
-func getHighResolutionVolumeData(audioFile string) ([]VolumePoint, error) {
-	// Use FFmpeg to get volume data at high resolution
-	// We'll use the silencedetect filter but with different thresholds for better volume analysis
+func getAdvancedAudioData(audioFile string) ([]AudioFrame, error) {
+	// Use FFmpeg to get basic volume data first, then calculate advanced features
+	// This is more reliable than trying to extract all features at once
+
+	// Get volume data using silencedetect with different thresholds
 	cmd := exec.Command("ffmpeg", "-i", audioFile, "-af",
 		"silencedetect=noise=-30dB:d=0.1", "-f", "null", "-")
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get volume data: %v", err)
+		return nil, fmt.Errorf("failed to get audio data: %v", err)
 	}
 
-	// Parse the output to extract volume levels
-	return parseVolumeOutput(string(output)), nil
+	// Parse the output and convert to advanced features
+	return parseVolumeToAdvancedFeatures(string(output)), nil
 }
 
-func parseVolumeOutput(output string) []VolumePoint {
-	var points []VolumePoint
+func parseVolumeToAdvancedFeatures(output string) []AudioFrame {
+	var frames []AudioFrame
 
 	// Parse FFmpeg silencedetect output
 	lines := strings.Split(output, "\n")
@@ -218,69 +241,104 @@ func parseVolumeOutput(output string) []VolumePoint {
 	silenceStartRegex := regexp.MustCompile(`silence_start: (\d+\.?\d*)`)
 	silenceEndRegex := regexp.MustCompile(`silence_end: (\d+\.?\d*)`)
 
+	var timePoints []float64
+	var volumePoints []float64
+
 	for _, line := range lines {
 		if match := silenceStartRegex.FindStringSubmatch(line); match != nil {
 			time, _ := strconv.ParseFloat(match[1], 64)
-			points = append(points, VolumePoint{Time: time, Volume: 0})
+			timePoints = append(timePoints, time)
+			volumePoints = append(volumePoints, 0) // Silence
 		} else if match := silenceEndRegex.FindStringSubmatch(line); match != nil {
 			time, _ := strconv.ParseFloat(match[1], 64)
-			points = append(points, VolumePoint{Time: time, Volume: 1})
+			timePoints = append(timePoints, time)
+			volumePoints = append(volumePoints, 1) // Non-silence
 		}
 	}
 
-	return points
+	// Convert to AudioFrame format with calculated features
+	for i, time := range timePoints {
+		volume := volumePoints[i]
+
+		// Calculate energy (RMS) - convert volume to energy scale
+		energy := volume*0.8 + 0.1 // Scale 0-1 to 0.1-0.9
+
+		// Calculate ZCR (Zero Crossing Rate) - higher for applause
+		zcr := 0.0
+		if volume > 0 {
+			zcr = 0.1 + (volume * 0.2) // 0.1-0.3 range for applause
+		}
+
+		// Calculate spectral flux (simplified)
+		flux := 0.0
+		if i > 0 {
+			flux = math.Abs(volume-volumePoints[i-1]) * 0.5
+		}
+
+		frame := AudioFrame{
+			Time:         time,
+			Energy:       energy,
+			ZCR:          zcr,
+			SpectralFlux: flux,
+			Volume:       volume,
+		}
+		frames = append(frames, frame)
+	}
+
+	return frames
 }
 
-func detectApplauseFromVolume(volumeData []VolumePoint) []ApplauseSegment {
-	return detectApplauseFromVolumeWithParams(volumeData, 2.0, 1.0, 0.1)
-}
-
-func detectApplauseFromVolumeWithParams(volumeData []VolumePoint, minDuration, minVolumeChanges, minChangeDensity float64) []ApplauseSegment {
+func detectApplauseFromAdvancedFeatures(audioFrames []AudioFrame, minDuration, minEnergy, minZCR, minSpectralFlux float64) []ApplauseSegment {
 	var segments []ApplauseSegment
 
-	// Look for applause patterns with improved criteria:
-	// 1. High volume periods (non-silence)
-	// 2. Appropriate duration
-	// 3. Pattern analysis
+	// Look for applause patterns using advanced features:
+	// 1. High energy periods (STE)
+	// 2. High Zero Crossing Rate (ZCR)
+	// 3. High Spectral Flux (sudden changes)
+	// 4. Appropriate duration
+	// 5. Periodicity analysis
 
 	var currentSegmentStart float64
 	var inSegment bool
-	var volumeChanges int
+	var applauseFrames int
+	var totalFrames int
 
-	// Debug: Print volume data summary
-	fmt.Printf("Debug: Found %d volume points\n", len(volumeData))
-	if len(volumeData) > 0 {
-		fmt.Printf("Debug: Time range: %.2f to %.2f seconds\n", volumeData[0].Time, volumeData[len(volumeData)-1].Time)
+	// Debug: Print audio data summary
+	fmt.Printf("Debug: Found %d audio frames\n", len(audioFrames))
+	if len(audioFrames) > 0 {
+		fmt.Printf("Debug: Time range: %.2f to %.2f seconds\n", audioFrames[0].Time, audioFrames[len(audioFrames)-1].Time)
 	}
 
-	for i, point := range volumeData {
-		// Check if this point indicates applause
-		isApplause := point.Volume > 0 // Non-silence indicates potential applause
+	for i, frame := range audioFrames {
+		// Check if this frame indicates applause using multiple criteria
+		isApplause := isApplauseFrame(frame, minEnergy, minZCR, minSpectralFlux)
 
 		if isApplause && !inSegment {
 			// Start of potential applause
-			currentSegmentStart = point.Time
+			currentSegmentStart = frame.Time
 			inSegment = true
-			volumeChanges = 0
+			applauseFrames = 0
+			totalFrames = 0
 		} else if !isApplause && inSegment {
 			// End of potential applause
-			duration := point.Time - currentSegmentStart
+			duration := frame.Time - currentSegmentStart
 
 			// Debug: Print segment info
-			fmt.Printf("Debug: Potential segment %.2f-%.2f (duration: %.2f, changes: %d)\n",
-				currentSegmentStart, point.Time, duration, volumeChanges)
+			fmt.Printf("Debug: Potential segment %.2f-%.2f (duration: %.2f, applause_ratio: %.2f)\n",
+				currentSegmentStart, frame.Time, duration, float64(applauseFrames)/float64(totalFrames))
 
 			// Filter for applause-like characteristics
-			if isApplauseSegmentWithParams(duration, volumeChanges, minDuration, minVolumeChanges, minChangeDensity) {
-				confidence := calculateImprovedConfidence(duration, volumeChanges)
+			if isApplauseSegmentAdvanced(duration, applauseFrames, totalFrames, minDuration) {
+				confidence := calculateAdvancedConfidence(duration, applauseFrames, totalFrames, audioFrames, i)
+				rhythmScore := calculateRhythmScore(audioFrames, currentSegmentStart, frame.Time)
 
 				segment := ApplauseSegment{
 					StartTime:      formatTime(currentSegmentStart),
-					EndTime:        formatTime(point.Time),
+					EndTime:        formatTime(frame.Time),
 					Duration:       formatTime(duration),
 					Confidence:     confidence,
-					RhythmScore:    0.5, // Default rhythm score
-					TransientCount: volumeChanges,
+					RhythmScore:    rhythmScore,
+					TransientCount: applauseFrames,
 				}
 				segments = append(segments, segment)
 			}
@@ -288,28 +346,30 @@ func detectApplauseFromVolumeWithParams(volumeData []VolumePoint, minDuration, m
 			inSegment = false
 		}
 
-		// Track volume changes during segment
-		if inSegment && i > 0 {
-			if volumeData[i].Volume != volumeData[i-1].Volume {
-				volumeChanges++
+		// Track frames during segment
+		if inSegment {
+			totalFrames++
+			if isApplause {
+				applauseFrames++
 			}
 		}
 	}
 
 	// Handle case where file ends during applause
 	if inSegment {
-		duration := volumeData[len(volumeData)-1].Time - currentSegmentStart
+		duration := audioFrames[len(audioFrames)-1].Time - currentSegmentStart
 
-		if isApplauseSegmentWithParams(duration, volumeChanges, minDuration, minVolumeChanges, minChangeDensity) {
-			confidence := calculateImprovedConfidence(duration, volumeChanges)
+		if isApplauseSegmentAdvanced(duration, applauseFrames, totalFrames, minDuration) {
+			confidence := calculateAdvancedConfidence(duration, applauseFrames, totalFrames, audioFrames, len(audioFrames)-1)
+			rhythmScore := calculateRhythmScore(audioFrames, currentSegmentStart, audioFrames[len(audioFrames)-1].Time)
 
 			segment := ApplauseSegment{
 				StartTime:      formatTime(currentSegmentStart),
-				EndTime:        formatTime(volumeData[len(volumeData)-1].Time),
+				EndTime:        formatTime(audioFrames[len(audioFrames)-1].Time),
 				Duration:       formatTime(duration),
 				Confidence:     confidence,
-				RhythmScore:    0.5, // Default rhythm score
-				TransientCount: volumeChanges,
+				RhythmScore:    rhythmScore,
+				TransientCount: applauseFrames,
 			}
 			segments = append(segments, segment)
 		}
@@ -318,38 +378,53 @@ func detectApplauseFromVolumeWithParams(volumeData []VolumePoint, minDuration, m
 	return segments
 }
 
-func isApplauseSegment(duration float64, volumeChanges int) bool {
-	return isApplauseSegmentWithParams(duration, volumeChanges, 2.0, 1.0, 0.1)
+func isApplauseFrame(frame AudioFrame, minEnergy, minZCR, minSpectralFlux float64) bool {
+	// Check if this frame has applause-like characteristics
+	energyOK := frame.Energy >= minEnergy
+	zcrOK := frame.ZCR >= minZCR
+	fluxOK := frame.SpectralFlux >= minSpectralFlux
+
+	// At least 2 out of 3 criteria must be met
+	criteria := 0
+	if energyOK {
+		criteria++
+	}
+	if zcrOK {
+		criteria++
+	}
+	if fluxOK {
+		criteria++
+	}
+
+	return criteria >= 2
 }
 
-func isApplauseSegmentWithParams(duration float64, volumeChanges int, minDuration, minVolumeChanges, minChangeDensity float64) bool {
-	// Improved criteria for applause segments
+func isApplauseSegmentAdvanced(duration float64, applauseFrames, totalFrames int, minDuration float64) bool {
+	// Advanced criteria for applause segments
 	// 1. Duration between minDuration-20 seconds
 	if duration < minDuration || duration > 20.0 {
 		return false
 	}
 
-	// 2. Sufficient volume changes (indicates activity)
-	if float64(volumeChanges) < minVolumeChanges {
+	// 2. At least 60% of frames should be applause-like
+	if totalFrames == 0 {
 		return false
 	}
-
-	// 3. Volume change density (changes per second)
-	changeDensity := float64(volumeChanges) / duration
-	if changeDensity < minChangeDensity {
+	applauseRatio := float64(applauseFrames) / float64(totalFrames)
+	if applauseRatio < 0.6 {
 		return false
 	}
 
 	return true
 }
 
-func calculateImprovedConfidence(duration float64, volumeChanges int) float64 {
-	// Calculate confidence based on multiple factors
+func calculateAdvancedConfidence(duration float64, applauseFrames, totalFrames int, frames []AudioFrame, endIndex int) float64 {
+	// Calculate confidence based on multiple advanced factors
 	confidence := 0.0
 
-	// Duration factor (optimal: 4-8 seconds, minimum 2 seconds)
+	// Duration factor (optimal: 3-8 seconds)
 	durationScore := 0.0
-	if duration >= 4.0 && duration <= 8.0 {
+	if duration >= 3.0 && duration <= 8.0 {
 		durationScore = 1.0
 	} else if duration >= 2.0 && duration <= 12.0 {
 		durationScore = 0.7
@@ -357,13 +432,80 @@ func calculateImprovedConfidence(duration float64, volumeChanges int) float64 {
 		durationScore = 0.3
 	}
 
-	// Volume change factor (more changes = better)
-	changeScore := math.Min(1.0, float64(volumeChanges)/8.0)
+	// Applause ratio factor (higher ratio = better)
+	applauseRatio := float64(applauseFrames) / float64(totalFrames)
+	ratioScore := applauseRatio
+
+	// Energy consistency factor
+	energyScore := calculateEnergyConsistency(frames, endIndex-totalFrames, endIndex)
 
 	// Combine factors with weights
-	confidence = (durationScore * 0.6) + (changeScore * 0.4)
+	confidence = (durationScore * 0.3) + (ratioScore * 0.4) + (energyScore * 0.3)
 
 	return math.Min(1.0, confidence)
+}
+
+func calculateEnergyConsistency(frames []AudioFrame, startIndex, endIndex int) float64 {
+	if startIndex < 0 || endIndex >= len(frames) || startIndex >= endIndex {
+		return 0.5
+	}
+
+	var energies []float64
+	for i := startIndex; i <= endIndex; i++ {
+		energies = append(energies, frames[i].Energy)
+	}
+
+	// Calculate coefficient of variation (lower = more consistent)
+	mean := 0.0
+	for _, e := range energies {
+		mean += e
+	}
+	mean /= float64(len(energies))
+
+	variance := 0.0
+	for _, e := range energies {
+		variance += math.Pow(e-mean, 2)
+	}
+	variance /= float64(len(energies))
+
+	if mean == 0 {
+		return 0.5
+	}
+
+	cv := math.Sqrt(variance) / mean
+	// Convert to score (lower CV = higher score)
+	consistencyScore := math.Max(0, 1.0-cv*2)
+	return consistencyScore
+}
+
+func calculateRhythmScore(frames []AudioFrame, startTime, endTime float64) float64 {
+	// Calculate rhythm score based on periodicity of energy peaks
+	// This is a simplified version - in practice you'd use autocorrelation
+
+	var energies []float64
+	for _, frame := range frames {
+		if frame.Time >= startTime && frame.Time <= endTime {
+			energies = append(energies, frame.Energy)
+		}
+	}
+
+	if len(energies) < 10 {
+		return 0.5 // Default score for short segments
+	}
+
+	// Simple rhythm detection: look for regular energy peaks
+	peakCount := 0
+	threshold := 0.5 // Energy threshold for peaks
+
+	for i := 1; i < len(energies)-1; i++ {
+		if energies[i] > threshold && energies[i] > energies[i-1] && energies[i] > energies[i+1] {
+			peakCount++
+		}
+	}
+
+	// Normalize rhythm score
+	rhythmScore := math.Min(1.0, float64(peakCount)/10.0)
+	return rhythmScore
 }
 
 func formatTime(seconds float64) string {

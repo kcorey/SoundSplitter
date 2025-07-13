@@ -261,15 +261,26 @@ func handleRunDetection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build command
-	minDuration := request.Params["minDuration"].(float64)
-	minVolumeChanges := request.Params["minVolumeChanges"].(float64)
-	minChangeDensity := request.Params["minChangeDensity"].(float64)
+	// Extract sensitivity parameter (1-10 scale)
+	sensitivity := 5.0 // default
+	if sens, ok := request.Params["sensitivity"]; ok {
+		if sensFloat, ok := sens.(float64); ok {
+			sensitivity = sensFloat
+		}
+	}
 
+	// Extract min duration if provided
+	minDuration := 2.0 // default
+	if dur, ok := request.Params["minDuration"]; ok {
+		if durFloat, ok := dur.(float64); ok {
+			minDuration = durFloat
+		}
+	}
+
+	// Build command with new sensitivity-based parameters
 	cmd := exec.Command("go", "run", "tools/applause_detector.go", request.VideoFile,
-		"--min-duration", fmt.Sprintf("%.1f", minDuration),
-		"--min-volume-changes", fmt.Sprintf("%.1f", minVolumeChanges),
-		"--min-change-density", fmt.Sprintf("%.3f", minChangeDensity))
+		"--sensitivity", fmt.Sprintf("%.1f", sensitivity),
+		"--min-duration", fmt.Sprintf("%.1f", minDuration))
 
 	// Run the command
 	output, err := cmd.CombinedOutput()
@@ -279,7 +290,7 @@ func handleRunDetection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Detection completed for %s", request.VideoFile)
+	log.Printf("Detection completed for %s with sensitivity %.1f", request.VideoFile, sensitivity)
 	w.WriteHeader(http.StatusOK)
 }
 
