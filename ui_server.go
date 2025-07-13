@@ -21,11 +21,13 @@ type VideoAnalysis struct {
 }
 
 type ApplauseSegment struct {
-	StartTime  string  `json:"start_time"`
-	EndTime    string  `json:"end_time"`
-	Duration   string  `json:"duration"`
-	Confidence float64 `json:"confidence"`
-	Selected   bool    `json:"selected"`
+	StartTime      string  `json:"start_time"`
+	EndTime        string  `json:"end_time"`
+	Duration       string  `json:"duration"`
+	Confidence     float64 `json:"confidence"`
+	RhythmScore    float64 `json:"rhythm_score"`
+	TransientCount int     `json:"transient_count"`
+	Selected       bool    `json:"selected"`
 }
 
 type SplitRequest struct {
@@ -59,6 +61,8 @@ func main() {
 	http.HandleFunc("/api/analyzed-files", handleAnalyzedFiles)
 	http.HandleFunc("/api/split-video", handleSplitVideo)
 	http.HandleFunc("/api/presenters", handlePresenters)
+	http.HandleFunc("/api/toastmaster", handleToastmaster)
+	http.HandleFunc("/api/run-detection", handleRunDetection)
 	http.HandleFunc("/videos/", handleVideoFiles)
 
 	port := ":8080"
@@ -213,6 +217,72 @@ func handlePresenters(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(allPresenters)
 }
 
+func handleToastmaster(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Try to load detected toastmaster from file
+	toastmasterFile := "detected_toastmaster.json"
+	if _, err := os.Stat(toastmasterFile); err == nil {
+		data, err := os.ReadFile(toastmasterFile)
+		if err == nil {
+			var toastmasterData map[string]string
+			if err := json.Unmarshal(data, &toastmasterData); err == nil {
+				if toastmaster, exists := toastmasterData["toastmaster"]; exists {
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(map[string]string{"toastmaster": toastmaster})
+					return
+				}
+			}
+		}
+	}
+
+	// Return empty response if no toastmaster detected
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"toastmaster": ""})
+}
+
+func handleRunDetection(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse request body
+	var request struct {
+		VideoFile string                 `json:"videoFile"`
+		Params    map[string]interface{} `json:"params"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Build command
+	minDuration := request.Params["minDuration"].(float64)
+	minVolumeChanges := request.Params["minVolumeChanges"].(float64)
+	minChangeDensity := request.Params["minChangeDensity"].(float64)
+
+	cmd := exec.Command("go", "run", "tools/applause_detector.go", request.VideoFile,
+		"--min-duration", fmt.Sprintf("%.1f", minDuration),
+		"--min-volume-changes", fmt.Sprintf("%.1f", minVolumeChanges),
+		"--min-change-density", fmt.Sprintf("%.3f", minChangeDensity))
+
+	// Run the command
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Detection error: %v, output: %s", err, string(output))
+		http.Error(w, "Detection failed", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Detection completed for %s", request.VideoFile)
+	w.WriteHeader(http.StatusOK)
+}
+
 func handleVideoFiles(w http.ResponseWriter, r *http.Request) {
 	// Extract filename from URL path
 	filename := strings.TrimPrefix(r.URL.Path, "/videos/")
@@ -338,6 +408,7 @@ func parsePDFPresenters(pdfFile string) ([]Presenter, error) {
 func extractPresentersFromText(text string) ([]Presenter, error) {
 	var presenters []Presenter
 	presenterSet := make(map[string]bool)
+	var toastmaster string
 
 	lines := strings.Split(text, "\n")
 
@@ -371,14 +442,29 @@ func extractPresentersFromText(text string) ([]Presenter, error) {
 		if len(fields) < 2 {
 			continue
 		}
+
+		// Check for Toastmaster role
+		roleField := ""
 		presenterField := ""
+
 		if timePattern.MatchString(strings.TrimSpace(fields[0])) {
+			if len(fields) >= 2 {
+				roleField = strings.TrimSpace(fields[1])
+			}
 			if len(fields) >= 3 {
 				presenterField = strings.TrimSpace(fields[2])
 			}
 		} else {
+			roleField = strings.TrimSpace(fields[0])
 			presenterField = strings.TrimSpace(fields[1])
 		}
+
+		// Detect Toastmaster
+		if strings.Contains(strings.ToLower(roleField), "toastmaster") && presenterField != "" {
+			toastmaster = presenterField
+			fmt.Printf("Detected Toastmaster: %s\n", toastmaster)
+		}
+
 		if presenterField == "" {
 			continue
 		}
@@ -403,6 +489,14 @@ func extractPresentersFromText(text string) ([]Presenter, error) {
 			presenters = append(presenters, Presenter{
 				Presenter: presenter,
 			})
+		}
+	}
+
+	// Save detected toastmaster to a file for the frontend to use
+	if toastmaster != "" {
+		toastmasterData := map[string]string{"toastmaster": toastmaster}
+		if data, err := json.Marshal(toastmasterData); err == nil {
+			os.WriteFile("detected_toastmaster.json", data, 0644)
 		}
 	}
 

@@ -72,6 +72,9 @@ class SoundSplitterUI {
             
             this.presenters = await response.json();
             this.renderPresenterTags();
+            
+            // Try to load detected toastmaster
+            await this.loadDetectedToastmaster();
         } catch (error) {
             console.error('Error loading presenters:', error);
             document.getElementById('presenterTags').innerHTML = `
@@ -80,6 +83,26 @@ class SoundSplitterUI {
                     No presenter data found. PDF files will be parsed if available.
                 </div>
             `;
+        }
+    }
+
+    async loadDetectedToastmaster() {
+        try {
+            const response = await fetch('/api/toastmaster');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.toastmaster && data.toastmaster.trim() !== '') {
+                    console.log('Detected toastmaster:', data.toastmaster);
+                    this.setToastmaster(data.toastmaster);
+                    
+                    // Automatically apply toastmaster to all segments
+                    setTimeout(() => {
+                        this.addToastmasterToAllSegments();
+                    }, 1000); // Small delay to ensure UI is rendered
+                }
+            }
+        } catch (error) {
+            console.error('Error loading detected toastmaster:', error);
         }
     }
 
@@ -135,12 +158,17 @@ class SoundSplitterUI {
                             Drop the toastmaster here
                         </div>
                     `}
+                    
+
                 </div>
             </div>
         `;
 
         // Initialize drag and drop after rendering presenter tags
         this.initializeDragAndDrop();
+        
+        // Initialize sensitivity slider
+        this.initializeSensitivitySlider();
     }
 
     initializeDragAndDrop() {
@@ -267,9 +295,7 @@ class SoundSplitterUI {
             
             toastmasterDropZone._clickHandler = (e) => {
                 if (this.getToastmaster()) {
-                    if (confirm('Remove current toastmaster?')) {
-                        this.setToastmaster(null);
-                    }
+                    this.setToastmaster(null);
                 }
             };
             
@@ -302,6 +328,7 @@ class SoundSplitterUI {
         
         // Initialize drag and drop after rendering
         this.initializeDragAndDrop();
+        this.initializeTimeEditing();
     }
 
     renderFileSection(file) {
@@ -334,7 +361,22 @@ class SoundSplitterUI {
                     </div>
                 </div>
                 <div class="segments-container">
-                    ${segments.map((segment, index) => this.renderSegmentItem(segment, file.filename, index)).join('')}
+                    ${segments.map((segment, index) => {
+                        let html = this.renderSegmentItem(segment, file.filename, index);
+                        
+                        // Add separator with add button between segments
+                        if (index < segments.length - 1) {
+                            html += `
+                                <div class="segment-separator p-2 text-center border-top" data-filename="${file.filename}" data-index="${index}">
+                                    <button class="btn btn-sm btn-outline-success segment-btn-add" onclick="app.splitterUI.addSegment('${file.filename}', ${index})">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                            `;
+                        }
+                        
+                        return html;
+                    }).join('')}
                 </div>
             </div>
         `;
@@ -356,7 +398,8 @@ class SoundSplitterUI {
                                    onclick="event.stopPropagation(); app.splitterUI.toggleSegment('${filename}', ${index}, this.checked)">
                             <div>
                                 <div class="fw-bold">
-                                    ${segment.start_time} - ${segment.end_time}
+                                    <span class="editable-time" data-type="start" data-filename="${filename}" data-index="${index}">${segment.start_time}</span> - 
+                                    <span class="editable-time" data-type="end" data-filename="${filename}" data-index="${index}">${segment.end_time}</span>
                                     <span class="badge bg-secondary ms-2">${segment.duration}</span>
                                 </div>
                                 <small class="text-muted">
@@ -375,7 +418,9 @@ class SoundSplitterUI {
                         </div>
                     </div>
                     <div class="text-end">
-                        <small class="text-muted">Split: ${segment.end_time}</small>
+                        <button class="btn btn-sm btn-outline-danger segment-item-remove" onclick="event.stopPropagation(); app.splitterUI.removeSegment('${filename}', ${index})">
+                            <i class="fas fa-minus"></i>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -1035,6 +1080,268 @@ class SoundSplitterUI {
                 // Fallback to original naming scheme
                 return `${baseName}_segment_001.mov`;
             }
+        }
+    }
+
+    // Segment management methods
+    addSegment(filename, index) {
+        const file = this.analyzedFiles.find(f => f.filename === filename);
+        if (!file) return;
+
+        // Get the current segment to calculate midpoint
+        const currentSegment = file.applause_segments[index];
+        const nextSegment = file.applause_segments[index + 1];
+        
+        let startTime, endTime;
+        if (nextSegment) {
+            // Insert between current and next segment
+            startTime = currentSegment.end_time;
+            endTime = nextSegment.start_time;
+        } else {
+            // Add at the end, 30 seconds after current segment
+            const currentEnd = this.parseTime(currentSegment.end_time);
+            startTime = this.formatTime(currentEnd);
+            endTime = this.formatTime(currentEnd + 30);
+        }
+
+        // Create new segment
+        const newSegment = {
+            start_time: startTime,
+            end_time: endTime,
+            duration: this.formatTime(this.parseTime(endTime) - this.parseTime(startTime)),
+            confidence: 0.5,
+            rhythm_score: 0.5,
+            transient_count: 1,
+            selected: true,
+            tags: []
+        };
+
+        // Insert the new segment
+        file.applause_segments.splice(index + 1, 0, newSegment);
+        
+        this.renderFileList();
+        this.updateSplitButton();
+    }
+
+    removeSegment(filename, index) {
+        const file = this.analyzedFiles.find(f => f.filename === filename);
+        if (!file || !file.applause_segments[index]) return;
+
+        file.applause_segments.splice(index, 1);
+        this.renderFileList();
+        this.updateSplitButton();
+    }
+
+    // Time editing methods
+    initializeTimeEditing() {
+        const editableTimes = document.querySelectorAll('.editable-time');
+        editableTimes.forEach(element => {
+            element.addEventListener('mousedown', this.handleTimeEditStart.bind(this));
+        });
+    }
+
+    handleTimeEditStart(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        
+        const element = event.target;
+        const filename = element.dataset.filename;
+        const index = parseInt(element.dataset.index);
+        const type = element.dataset.type;
+        
+        let startX = event.clientX;
+        let startTime = this.parseTime(element.textContent);
+        
+        const handleMouseMove = (e) => {
+            const deltaX = e.clientX - startX;
+            const timeDelta = Math.round(deltaX / 10); // 10 pixels = 1 second
+            
+            let newTime = startTime + timeDelta;
+            
+            // Ensure time is within bounds
+            const file = this.analyzedFiles.find(f => f.filename === filename);
+            if (file && file.applause_segments[index]) {
+                const segment = file.applause_segments[index];
+                
+                if (type === 'start') {
+                    const endTime = this.parseTime(segment.end_time);
+                    newTime = Math.max(0, Math.min(newTime, endTime - 1)); // At least 1 second duration
+                } else if (type === 'end') {
+                    const startTime = this.parseTime(segment.start_time);
+                    newTime = Math.max(startTime + 1, newTime); // At least 1 second duration
+                }
+            }
+            
+            element.textContent = this.formatTime(newTime);
+        };
+        
+        const handleMouseUp = () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+            
+            // Update the segment data
+            const file = this.analyzedFiles.find(f => f.filename === filename);
+            if (file && file.applause_segments[index]) {
+                const segment = file.applause_segments[index];
+                const newTime = this.parseTime(element.textContent);
+                
+                if (type === 'start') {
+                    segment.start_time = element.textContent;
+                } else if (type === 'end') {
+                    segment.end_time = element.textContent;
+                }
+                
+                // Update duration
+                const startTime = this.parseTime(segment.start_time);
+                const endTime = this.parseTime(segment.end_time);
+                segment.duration = this.formatTime(endTime - startTime);
+                
+                // Update duration display in UI
+                this.updateDurationDisplay(filename, index, segment.duration);
+                
+                this.updateSplitButton();
+            }
+        };
+        
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+    }
+    
+    updateDurationDisplay(filename, index, duration) {
+        const segmentElement = document.querySelector(`[data-filename="${filename}"][data-index="${index}"]`);
+        if (segmentElement) {
+            const durationElement = segmentElement.querySelector('.duration');
+            if (durationElement) {
+                durationElement.textContent = duration;
+            }
+        }
+    }
+
+    formatTime(seconds) {
+        const minutes = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    
+    // Sensitivity slider methods
+    initializeSensitivitySlider() {
+        const slider = document.getElementById('sensitivitySlider');
+        const valueDisplay = document.getElementById('sensitivityValue');
+        
+        if (slider && valueDisplay) {
+            // Update value display when slider changes
+            slider.addEventListener('input', (e) => {
+                valueDisplay.textContent = e.target.value;
+            });
+            
+            // Re-run detection when slider is released
+            slider.addEventListener('change', (e) => {
+                this.updateDetectionSensitivity(parseInt(e.target.value));
+            });
+            
+            // Show initial stats
+            this.updateDetectionStats();
+        }
+    }
+    
+    updateDetectionSensitivity(sensitivity) {
+        // Map sensitivity (1-10) to detection parameters
+        const sensitivityParams = this.getSensitivityParameters(sensitivity);
+        
+        // Show loading state
+        this.showDetectionLoading();
+        
+        // Re-run applause detection with new parameters
+        this.runApplauseDetection(sensitivityParams).then(() => {
+            this.loadAnalyzedFiles().then(() => {
+                this.renderFileList();
+                this.updateDetectionStats();
+                this.hideDetectionLoading();
+            });
+        });
+    }
+    
+    getSensitivityParameters(sensitivity) {
+        // Map sensitivity 1-10 to detection parameters
+        const params = {
+            minDuration: Math.max(1, 4 - sensitivity * 0.3), // 1.0 to 1.7 seconds
+            maxDuration: 20,
+            minVolumeChanges: Math.max(1, 3 - sensitivity * 0.2), // 1 to 1.8
+            minChangeDensity: Math.max(0.05, 0.2 - sensitivity * 0.015) // 0.05 to 0.05
+        };
+        
+        return params;
+    }
+    
+    async runApplauseDetection(params) {
+        // Run the applause detector with new parameters
+        const videoFiles = this.getVideoFiles();
+        
+        for (const videoFile of videoFiles) {
+            const command = `go run tools/applause_detector.go "${videoFile}" --min-duration ${params.minDuration} --min-volume-changes ${params.minVolumeChanges} --min-change-density ${params.minChangeDensity}`;
+            
+            try {
+                // Use fetch to call a backend endpoint that will run the command
+                const response = await fetch('/api/run-detection', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        videoFile: videoFile,
+                        params: params
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Detection failed');
+                }
+                
+                console.log('Detection completed for:', videoFile);
+            } catch (error) {
+                console.error('Failed to run applause detection:', error);
+            }
+        }
+    }
+    
+    getVideoFiles() {
+        // Get list of video files in the current directory
+        const videoExtensions = ['.mov', '.MOV', '.mp4', '.MP4', '.avi', '.AVI'];
+        // This would need to be implemented to scan for video files
+        // For now, return a default list
+        return ['IMG_2333.MOV']; // You can expand this list
+    }
+    
+    showDetectionLoading() {
+        const statsDiv = document.getElementById('detectionStats');
+        if (statsDiv) {
+            statsDiv.innerHTML = `
+                <div class="text-center">
+                    <i class="fas fa-spinner fa-spin me-2"></i>
+                    Re-running detection...
+                </div>
+            `;
+        }
+    }
+    
+    hideDetectionLoading() {
+        // Loading state will be cleared when stats are updated
+    }
+    
+    updateDetectionStats() {
+        const statsDiv = document.getElementById('detectionStats');
+        if (statsDiv && this.analyzedFiles.length > 0) {
+            const stats = this.analyzedFiles.map(file => {
+                const segmentCount = file.applause_segments ? file.applause_segments.length : 0;
+                return `${file.filename}: ${segmentCount} events`;
+            }).join(', ');
+            
+            statsDiv.innerHTML = `
+                <div class="text-muted">
+                    <i class="fas fa-chart-bar me-1"></i>
+                    ${stats}
+                </div>
+            `;
         }
     }
 }
