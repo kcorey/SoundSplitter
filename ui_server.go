@@ -63,6 +63,7 @@ func main() {
 	http.HandleFunc("/api/presenters", handlePresenters)
 	http.HandleFunc("/api/toastmaster", handleToastmaster)
 	http.HandleFunc("/api/run-detection", handleRunDetection)
+	http.HandleFunc("/api/save-bash-script", handleSaveBashScript)
 	http.HandleFunc("/videos/", handleVideoFiles)
 
 	port := ":8080"
@@ -666,4 +667,42 @@ func extractVideoSegment(inputFile, outputFile string, startTime, endTime float6
 	}
 
 	return nil
+}
+
+type BashScriptRequest struct {
+	Script string `json:"script"`
+}
+
+func handleSaveBashScript(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req BashScriptRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Create extracted directory if it doesn't exist
+	extractedDir := "extracted"
+	if err := os.MkdirAll(extractedDir, 0755); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create extracted directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Save the bash script to the extracted directory
+	scriptPath := filepath.Join(extractedDir, "extract_videos.sh")
+	if err := os.WriteFile(scriptPath, []byte(req.Script), 0755); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to save bash script: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"success": "true",
+		"message": "Bash script saved successfully",
+		"path":    scriptPath,
+	})
 }

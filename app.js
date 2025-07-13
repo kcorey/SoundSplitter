@@ -25,6 +25,9 @@ class SoundSplitterUI {
         this.actionStack = [];
         this.maxUndoActions = 20; // Maximum number of actions to remember
         
+        // State persistence
+        this.stateCookieName = 'soundSplitterState';
+        
         this.initializeEventListeners();
         this.loadAnalyzedFiles();
         this.loadPresenters();
@@ -56,8 +59,18 @@ class SoundSplitterUI {
     }
 
     async loadAnalyzedFiles() {
+        // Try to load saved state first
+        const stateLoaded = this.loadState();
+        
+        if (stateLoaded) {
+            // Use saved state
+            this.renderFileList();
+            this.updateSplitButton();
+            return;
+        }
+        
+        // Fall back to loading from server
         try {
-            // Look for JSON analysis files
             const response = await fetch('/api/analyzed-files');
             if (!response.ok) {
                 throw new Error('Failed to load analyzed files');
@@ -131,7 +144,7 @@ class SoundSplitterUI {
             return;
         }
 
-        const uniquePresenters = [...new Set(this.presenters.map(p => p.presenter))];
+        const uniquePresenters = [...new Set(this.presenters.map(p => p.presenter))].sort();
         const toastmaster = this.getToastmaster();
         
         document.getElementById('presenterTags').innerHTML = `
@@ -398,17 +411,17 @@ class SoundSplitterUI {
 
     renderSegmentItem(segment, filename, index) {
         const confidenceClass = this.getConfidenceClass(segment.confidence);
-        const isSelected = segment.selected !== false;
+        const isChecked = segment.selected === true; // Only true if explicitly set to true
         
         return `
-            <div class="segment-item p-3 border-bottom ${isSelected ? 'selected' : ''}" 
+            <div class="segment-item p-3 border-bottom" 
                  onclick="app.splitterUI.playSegment('${filename}', ${index})"
                  data-filename="${filename}" data-index="${index}">
                 <div class="d-flex justify-content-between align-items-center">
                     <div class="flex-grow-1">
                         <div class="d-flex align-items-center">
                             <input type="checkbox" class="form-check-input me-3" 
-                                   ${isSelected ? 'checked' : ''}
+                                   ${isChecked ? 'checked' : ''}
                                    onclick="event.stopPropagation(); app.splitterUI.toggleSegment('${filename}', ${index}, this.checked)">
                             <div>
                                 <div class="fw-bold">
@@ -500,6 +513,9 @@ class SoundSplitterUI {
                 if (newSegmentList) {
                     newSegmentList.scrollTop = scrollTop;
                 }
+                
+                // Save state after adding tag
+                this.saveState();
             }
         }
     }
@@ -522,7 +538,24 @@ class SoundSplitterUI {
                 if (newSegmentList) {
                     newSegmentList.scrollTop = scrollTop;
                 }
+                
+                // Save state after removing tag
+                this.saveState();
             }
+        }
+    }
+
+    // Centralized selection management
+    setSelectedSegment(filename, index) {
+        // Remove selection from all segments
+        document.querySelectorAll('.segment-item').forEach(item => {
+            item.classList.remove('selected');
+        });
+        
+        // Add selection to the specified segment
+        const targetSegment = document.querySelector(`[data-filename="${filename}"][data-index="${index}"]`);
+        if (targetSegment) {
+            targetSegment.classList.add('selected');
         }
     }
 
@@ -570,11 +603,8 @@ class SoundSplitterUI {
             <small class="text-muted">(Duration: ${segment.duration}, Playback: ${playbackDuration.toFixed(1)}s)</small>
         `;
 
-        // Update visual selection
-        document.querySelectorAll('.segment-item').forEach(item => {
-            item.classList.remove('selected');
-        });
-        event.currentTarget.classList.add('selected');
+        // Update visual selection using centralized function
+        this.setSelectedSegment(filename, index);
     }
 
     stopCurrentPlayback() {
@@ -606,83 +636,8 @@ class SoundSplitterUI {
             return;
         }
         
-        // Show detailed confirmation dialog with selectable text
-        const first10Items = extractionPlan.slice(0, 10);
-        const planText = first10Items.map((item, index) => 
-            `${index + 1}. ${item.filename}\n   Time: ${item.startTime} → ${item.endTime}\n   Duration: ${item.duration}\n   Output: ${item.outputName}`
-        ).join('\n\n');
-        
-        const remainingCount = extractionPlan.length - 10;
-        const remainingText = remainingCount > 0 ? `\n\n... and ${remainingCount} more segments` : '';
-        
-        const fullPlanText = `Extraction Plan:\n\n${planText}${remainingText}\n\nTotal segments: ${extractionPlan.length}\n\nDo you want to proceed with this extraction?`;
-        
-        // Create a textarea for selectable text
-        const textarea = document.createElement('textarea');
-        textarea.value = fullPlanText;
-        textarea.style.width = '600px';
-        textarea.style.height = '400px';
-        textarea.style.fontFamily = 'monospace';
-        textarea.style.fontSize = '12px';
-        textarea.readOnly = true;
-        
-        // Create modal dialog
-        const modal = document.createElement('div');
-        modal.style.position = 'fixed';
-        modal.style.top = '0';
-        modal.style.left = '0';
-        modal.style.width = '100%';
-        modal.style.height = '100%';
-        modal.style.backgroundColor = 'rgba(0,0,0,0.5)';
-        modal.style.display = 'flex';
-        modal.style.justifyContent = 'center';
-        modal.style.alignItems = 'center';
-        modal.style.zIndex = '10000';
-        
-        const modalContent = document.createElement('div');
-        modalContent.style.backgroundColor = 'white';
-        modalContent.style.padding = '20px';
-        modalContent.style.borderRadius = '8px';
-        modalContent.style.maxWidth = '80%';
-        modalContent.style.maxHeight = '80%';
-        modalContent.style.overflow = 'auto';
-        
-        const title = document.createElement('h4');
-        title.textContent = 'Extraction Plan';
-        title.style.marginBottom = '15px';
-        
-        const description = document.createElement('p');
-        description.textContent = 'Review the extraction plan below. You can select and copy the text:';
-        description.style.marginBottom = '10px';
-        
-        const buttonContainer = document.createElement('div');
-        buttonContainer.style.marginTop = '15px';
-        buttonContainer.style.textAlign = 'right';
-        
-        const proceedButton = document.createElement('button');
-        proceedButton.textContent = 'Proceed';
-        proceedButton.className = 'btn btn-success me-2';
-        proceedButton.onclick = () => {
-            document.body.removeChild(modal);
-            this.executeExtraction(extractionPlan);
-        };
-        
-        const cancelButton = document.createElement('button');
-        cancelButton.textContent = 'Cancel';
-        cancelButton.className = 'btn btn-secondary';
-        cancelButton.onclick = () => {
-            document.body.removeChild(modal);
-        };
-        
-        buttonContainer.appendChild(proceedButton);
-        buttonContainer.appendChild(cancelButton);
-        
-        modalContent.appendChild(title);
-        modalContent.appendChild(description);
-        modalContent.appendChild(textarea);
-        modalContent.appendChild(buttonContainer);
-        modal.appendChild(modalContent);
-        document.body.appendChild(modal);
+        // Execute extraction directly
+        this.executeExtraction(extractionPlan);
     }
 
     async executeExtraction(extractionPlan) {
@@ -696,6 +651,9 @@ class SoundSplitterUI {
         this.splitProgressBar.style.width = '0%';
         this.splitStatus.textContent = 'Starting extraction...';
         
+        // Generate bash script first
+        await this.generateBashScript(extractionPlan);
+        
         const selectedFiles = this.analyzedFiles.filter(file => 
             file.applause_segments && file.applause_segments.some(segment => segment.selected !== false)
         );
@@ -706,7 +664,7 @@ class SoundSplitterUI {
         // Reset tag counts for naming (start fresh each time)
         const tagCounts = {};
 
-                try {
+        try {
             for (const item of extractionPlan) {
                 // Check if user wants to stop
                 if (this.shouldStopExtraction) {
@@ -740,6 +698,54 @@ class SoundSplitterUI {
             setTimeout(() => {
                 this.splitProgress.classList.remove('show');
             }, 3000);
+        }
+    }
+
+    async generateBashScript(extractionPlan) {
+        try {
+            const scriptContent = `#!/bin/bash
+# SoundSplitter Video Extraction Script
+# Generated on ${new Date().toISOString()}
+# This script contains ffmpeg commands to extract video segments
+
+echo "Starting video extraction..."
+
+`;
+
+            // Add ffmpeg commands for each segment
+            for (const item of extractionPlan) {
+                const startTime = this.parseTime(item.startTime);
+                const endTime = this.parseTime(item.endTime);
+                const duration = endTime - startTime;
+                
+                scriptContent += `# Extract: ${item.filename} from ${item.startTime} to ${item.endTime} -> ${item.outputName}
+ffmpeg -i "${item.filename}" -ss ${item.startTime} -t ${duration} -c copy "${item.outputName}"
+echo "Extracted: ${item.outputName}"
+
+`;
+            }
+
+            scriptContent += `echo "Video extraction completed!"
+`;
+
+            // Send the script to the server to save it
+            const response = await fetch('/api/save-bash-script', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    script: scriptContent
+                })
+            });
+
+            if (response.ok) {
+                console.log('Bash script generated successfully');
+            } else {
+                console.error('Failed to save bash script');
+            }
+        } catch (error) {
+            console.error('Error generating bash script:', error);
         }
     }
 
@@ -820,24 +826,16 @@ class SoundSplitterUI {
                 outputName: firstOutputName
             });
             
-            // Process all selected segments
+            // Process all selected segments (except the last one, which we'll handle separately)
             for (let segmentIndex = 0; segmentIndex < orderedSelectedSegments.length-1; segmentIndex++) {
                 const currentSegmentInfo = orderedSelectedSegments[segmentIndex];
                 const currentSegment = currentSegmentInfo.segment;
                 
                 let segmentStart, segmentEnd, duration;
                 
-                // if (segmentIndex === 0) {
-                    segmentStart = currentSegment.start_time;
-                    const nextSegmentInfo = orderedSelectedSegments[segmentIndex + 1];
-                    segmentEnd = nextSegmentInfo.segment.end_time;
-                // } else {
-                //     // Other segments: previous applause to current applause
-                //     const previousSegmentInfo = orderedSelectedSegments[segmentIndex - 1];
-                //     const previousSegment = previousSegmentInfo.segment;
-                //     segmentStart = previousSegment.start_time;
-                //     segmentEnd = currentSegment.end_time;
-                // }
+                segmentStart = currentSegment.start_time;
+                const nextSegmentInfo = orderedSelectedSegments[segmentIndex + 1];
+                segmentEnd = nextSegmentInfo.segment.end_time;
                 
                 const startSeconds = this.parseTime(segmentStart);
                 const endSeconds = this.parseTime(segmentEnd);
@@ -875,6 +873,50 @@ class SoundSplitterUI {
                     endTime: segmentEnd,
                     duration: duration,
                     outputName: outputName
+                });
+            }
+            
+            // Create final segment from last selected applause to end of video
+            if (orderedSelectedSegments.length > 0) {
+                const lastSegmentInfo = orderedSelectedSegments[orderedSelectedSegments.length - 1];
+                const lastSegment = lastSegmentInfo.segment;
+                
+                const finalSegmentStart = lastSegment.start_time;
+                const finalSegmentEnd = '99:59'; // Use a very long time to capture to end of video
+                const finalStartSeconds = this.parseTime(finalSegmentStart);
+                const finalDuration = this.formatDuration(9999 - finalStartSeconds); // Approximate duration
+                
+                console.log(`Final segment: ${finalSegmentStart} - ${finalSegmentEnd}, Tags:`, lastSegment.tags);
+                
+                // Generate filename based on tags from the last segment
+                let finalOutputName;
+                if (lastSegment.tags && lastSegment.tags.length > 0) {
+                    const tag = lastSegment.tags[0];
+                    const presenterName = tag.startsWith('Custom:') ? tag.replace('Custom:', '') : tag;
+                    
+                    // Check for filename collisions in the entire plan
+                    let presenterCount = 1;
+                    let proposedName = `${presenterName}-${presenterCount}.mov`;
+                    
+                    // Keep incrementing until we find a unique filename
+                    while (plan.some(item => item.outputName === proposedName)) {
+                        presenterCount++;
+                        proposedName = `${presenterName}-${presenterCount}.mov`;
+                    }
+                    
+                    finalOutputName = proposedName;
+                    console.log(`Using tag "${tag}" for final segment -> ${finalOutputName}`);
+                } else {
+                    finalOutputName = `${file.filename.replace(/\.[^/.]+$/, "")}_segment_${String(lastSegmentInfo.index + 1).padStart(3, '0')}.mov`;
+                    console.log(`No tags for final segment -> ${finalOutputName}`);
+                }
+                
+                plan.push({
+                    filename: file.filename,
+                    startTime: finalSegmentStart,
+                    endTime: finalSegmentEnd,
+                    duration: finalDuration,
+                    outputName: finalOutputName
                 });
             }
         }
@@ -971,6 +1013,9 @@ class SoundSplitterUI {
         localStorage.setItem('toastmaster', presenter || '');
         this.renderPresenterTags();
         this.initializeDragAndDrop();
+        
+        // Save state after setting toastmaster
+        this.saveState();
     }
 
     getToastmaster() {
@@ -994,6 +1039,9 @@ class SoundSplitterUI {
         
         this.renderFileList();
         this.initializeDragAndDrop();
+        
+        // Save state after adding toastmaster to all segments
+        this.saveState();
     }
 
     // Custom tag methods
@@ -1010,6 +1058,9 @@ class SoundSplitterUI {
             this.renderPresenterTags();
             
             console.log('Created custom tag:', customName);
+            
+            // Save state after creating custom tag
+            this.saveState();
         }
     }
 
@@ -1049,6 +1100,9 @@ class SoundSplitterUI {
                     if (newSegmentList) {
                         newSegmentList.scrollTop = scrollTop;
                     }
+                    
+                    // Save state after replacing tag
+                    this.saveState();
                 }
             }
         }
@@ -1152,6 +1206,9 @@ class SoundSplitterUI {
         });
         
         this.updateSplitButton();
+        
+        // Save state after adding segment
+        this.saveState();
     }
 
     removeSegment(filename, index) {
@@ -1178,6 +1235,9 @@ class SoundSplitterUI {
         });
         
         this.updateSplitButton();
+        
+        // Save state after removing segment
+        this.saveState();
     }
 
     // Time editing methods
@@ -1244,10 +1304,13 @@ class SoundSplitterUI {
                 const endTime = this.parseTime(segment.end_time);
                 segment.duration = this.formatTime(endTime - startTime);
                 
-                // Update duration display in UI
-                this.updateDurationDisplay(filename, index, segment.duration);
-                
-                this.updateSplitButton();
+                        // Update duration display in UI
+        this.updateDurationDisplay(filename, index, segment.duration);
+        
+        this.updateSplitButton();
+        
+        // Save state after time change
+        this.saveState();
             }
         };
         
@@ -1391,6 +1454,92 @@ class SoundSplitterUI {
         }
     }
     
+    // State persistence methods
+    saveState() {
+        const state = {
+            analyzedFiles: this.analyzedFiles,
+            toastmaster: this.toastmaster,
+            timestamp: new Date().toISOString()
+        };
+        
+        try {
+            const stateJson = JSON.stringify(state);
+            document.cookie = `${this.stateCookieName}=${encodeURIComponent(stateJson)}; path=/; max-age=2592000`; // 30 days
+            console.log('State saved to cookie');
+        } catch (error) {
+            console.error('Failed to save state:', error);
+        }
+    }
+    
+    loadState() {
+        try {
+            const cookies = document.cookie.split(';');
+            const stateCookie = cookies.find(cookie => cookie.trim().startsWith(`${this.stateCookieName}=`));
+            
+            if (stateCookie) {
+                const stateJson = decodeURIComponent(stateCookie.split('=')[1]);
+                const state = JSON.parse(stateJson);
+                
+                // Check if the state is recent (within last 7 days)
+                const stateDate = new Date(state.timestamp);
+                const now = new Date();
+                const daysDiff = (now - stateDate) / (1000 * 60 * 60 * 24);
+                
+                if (daysDiff <= 7) {
+                    this.analyzedFiles = state.analyzedFiles || [];
+                    this.toastmaster = state.toastmaster || null;
+                    console.log('State loaded from cookie');
+                    return true;
+                } else {
+                    console.log('State cookie is too old, ignoring');
+                    this.clearState();
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load state:', error);
+            this.clearState();
+        }
+        return false;
+    }
+    
+    clearState() {
+        document.cookie = `${this.stateCookieName}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+        console.log('State cookie cleared');
+    }
+    
+    // Modified loadAnalyzedFiles to check for saved state first
+    async loadAnalyzedFiles() {
+        // Try to load saved state first
+        const stateLoaded = this.loadState();
+        
+        if (stateLoaded) {
+            // Use saved state
+            this.renderFileList();
+            this.updateSplitButton();
+            return;
+        }
+        
+        // Fall back to loading from server
+        try {
+            const response = await fetch('/api/analyzed-files');
+            if (!response.ok) {
+                throw new Error('Failed to load analyzed files');
+            }
+            
+            this.analyzedFiles = await response.json();
+            this.renderFileList();
+            this.updateSplitButton();
+        } catch (error) {
+            console.error('Error loading analyzed files:', error);
+            this.fileList.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    No analyzed files found. Please run the applause detector first.
+                </div>
+            `;
+        }
+    }
+    
     // Undo system methods
     recordAction(action) {
         this.actionStack.push(action);
@@ -1446,6 +1595,9 @@ class SoundSplitterUI {
                 segmentElement.scrollIntoView({ behavior: 'instant', block: 'center' });
             }
         });
+        
+        // Save state after undo action
+        this.saveState();
     }
 }
 

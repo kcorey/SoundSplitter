@@ -15,7 +15,6 @@
         }
         
         .segment-list {
-            max-height: 80vh;
             overflow-y: auto;
         }
         
@@ -130,6 +129,31 @@
             display: flex;
             flex-direction: column;
             min-height: 0;
+            overflow: hidden;
+        }
+        
+        .content-row {
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+            height: 100%;
+        }
+        
+        .content-row .card {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .content-row .card-body {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .content-row .card-body > div {
+            overflow: auto;
         }
         
         .file-list-container {
@@ -140,7 +164,28 @@
         
         #fileList {
             max-height: none;
+            overflow-y: auto;
             height: 100%;
+        }
+        
+        /* Ensure segments list card is properly constrained */
+        .segments-list-card {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .segments-list-card .card-body {
+            flex: 1;
+            overflow: hidden;
+            padding: 0;
+            max-height: calc(100vh - 250px); /* Account for header, bottom banner, and padding */
+        }
+        
+        .segments-list-card .card-body > div {
+            height: 100%;
+            overflow-y: auto;
+            max-height: 100%;
         }
         
         .split-videos-section {
@@ -206,60 +251,18 @@
                 </div>
             </div>
 
-            <div class="row flex-grow-1">
-                <!-- Presenter Tags -->
-                <div class="col-md-3">
-                    <div class="card">
-                        <div class="card-header">
-                            <h5 class="mb-0">
-                                <i class="fas fa-users me-2"></i>
-                                Presenter Tags
-                            </h5>
-                        </div>
-                        <div class="card-body">
-                            <div id="presenterTags">
-                                <div class="text-center text-muted">
-                                    <i class="fas fa-spinner fa-spin me-2"></i>
-                                    Loading presenters...
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Detection Sensitivity -->
-                    <div class="card mt-3">
-                        <div class="card-header">
-                            <h5 class="mb-0">
-                                <i class="fas fa-sliders-h me-2"></i>
-                                Detection Sensitivity
-                            </h5>
-                        </div>
-                        <div class="card-body">
-                            <input type="range" class="form-range" id="sensitivitySlider" 
-                                   min="1" max="10" value="5" step="1">
-                            <div class="d-flex justify-content-between small text-muted mt-2">
-                                <span>Low</span>
-                                <span id="sensitivityValue">5</span>
-                                <span>High</span>
-                            </div>
-                            <div id="detectionStats" class="mt-3 small text-muted">
-                                <!-- Detection stats will be populated here -->
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
+            <div class="row content-row">
                 <!-- Segments List -->
-                <div class="col-md-5">
-                    <div class="card h-100">
+                <div class="col-auto" style="max-width: 500px; min-width: 350px;">
+                    <div class="card segments-list-card">
                         <div class="card-header">
                             <h5 class="mb-0">
                                 <i class="fas fa-list me-2"></i>
                                 All Applause Segments
                             </h5>
                         </div>
-                        <div class="card-body d-flex flex-column p-0">
-                            <div id="fileList" class="flex-grow-1 overflow-auto p-3">
+                        <div class="card-body p-0">
+                            <div id="fileList" class="p-3">
                                 <div class="text-center text-muted">
                                     <i class="fas fa-spinner fa-spin me-2"></i>
                                     Loading analyzed files...
@@ -269,24 +272,67 @@
                     </div>
                 </div>
 
-                <!-- Video Player -->
-                <div class="col-md-4">
-                    <div class="card">
-                        <div class="card-header">
-                            <h5 class="mb-0">
-                                <i class="fas fa-play me-2"></i>
-                                Video Player
-                            </h5>
-                        </div>
-                        <div class="card-body">
-                            <div class="video-container">
-                                <video id="videoPlayer" controls class="w-100">
-                                    Your browser does not support the video tag.
-                                </video>
+                <!-- Video Player and Presenter Tags -->
+                <div class="col">
+                    <div class="d-flex flex-column h-100">
+                        <!-- Video Player -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-play me-2"></i>
+                                    Video Player
+                                </h5>
                             </div>
-                            <div class="mt-3">
-                                <div id="currentSegment" class="text-muted">
-                                    Click on a segment to play video
+                            <div class="card-body">
+                                <div class="video-container">
+                                    <video id="videoPlayer" controls class="w-100">
+                                        Your browser does not support the video tag.
+                                    </video>
+                                </div>
+                                <div class="mt-3">
+                                    <div id="currentSegment" class="text-muted">
+                                        Click on a segment to play video
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Presenter Tags -->
+                        <div class="card mt-3">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-users me-2"></i>
+                                    Presenter Tags
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div id="presenterTags">
+                                    <div class="text-center text-muted">
+                                        <i class="fas fa-spinner fa-spin me-2"></i>
+                                        Loading presenters...
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Detection Sensitivity -->
+                        <div class="card mt-3">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-sliders-h me-2"></i>
+                                    Detection Sensitivity
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <input type="range" class="form-range" id="sensitivitySlider" 
+                                       min="1" max="10" value="5" step="1">
+                                <div class="d-flex justify-content-between small text-muted mt-2">
+                                    <span>Low</span>
+                                    <span id="sensitivityValue">5</span>
+                                    <span>High</span>
+                                </div>
+                                <div id="detectionStats" class="mt-3 small text-muted">
+                                    <!-- Detection stats will be populated here -->
                                 </div>
                             </div>
                         </div>
