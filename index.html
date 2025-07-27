@@ -380,5 +380,52 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="app.js"></script>
+    <script>
+        // Notify the server when the browser window is closing
+        function notifyServerClosing() {
+            console.log('Browser closing detected, notifying server...');
+            
+            // Try multiple methods to ensure the request gets sent
+            navigator.sendBeacon('/api/browser-closing', JSON.stringify({}));
+            
+            // Also try fetch as backup
+            fetch('/api/browser-closing', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({})
+            }).catch(function(error) {
+                console.log('Fetch error:', error);
+            });
+        }
+
+        // Multiple event listeners to catch different scenarios
+        window.addEventListener('beforeunload', notifyServerClosing);
+        window.addEventListener('unload', notifyServerClosing);
+        window.addEventListener('pagehide', notifyServerClosing);
+        
+        // Also try to detect when the page becomes hidden
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'hidden') {
+                console.log('Page hidden, notifying server...');
+                notifyServerClosing();
+            }
+        });
+        
+        // Periodic ping to keep the connection alive
+        setInterval(function() {
+            fetch('/api/ping')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Ping successful:', data);
+                })
+                .catch(error => {
+                    console.log('Ping failed:', error);
+                });
+        }, 5000); // Ping every 5 seconds
+        
+        console.log('Browser close detection script loaded');
+    </script>
 </body>
 </html> 

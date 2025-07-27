@@ -4,15 +4,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"sync"
+	"syscall"
+	"time"
 
 	"github.com/unidoc/unipdf/v3/extractor"
 	"github.com/unidoc/unipdf/v3/model"
+)
+
+// Global variables for browser monitoring
+var (
+	lastPingTime  time.Time
+	pingMutex     sync.RWMutex
+	lastActivity  time.Time
+	activityMutex sync.RWMutex
 )
 
 type VideoAnalysis struct {
@@ -57,20 +71,48 @@ func main() {
 	// Serve static files
 	http.HandleFunc("/", handleStatic)
 
-	// API endpoints
-	http.HandleFunc("/api/analyzed-files", handleAnalyzedFiles)
-	http.HandleFunc("/api/split-video", handleSplitVideo)
-	http.HandleFunc("/api/presenters", handlePresenters)
-	http.HandleFunc("/api/toastmaster", handleToastmaster)
-	http.HandleFunc("/api/run-detection", handleRunDetection)
-	http.HandleFunc("/api/save-bash-script", handleSaveBashScript)
+	// API endpoints with activity tracking
+	http.HandleFunc("/api/analyzed-files", trackActivity(handleAnalyzedFiles))
+	http.HandleFunc("/api/split-video", trackActivity(handleSplitVideo))
+	http.HandleFunc("/api/presenters", trackActivity(handlePresenters))
+	http.HandleFunc("/api/toastmaster", trackActivity(handleToastmaster))
+	http.HandleFunc("/api/run-detection", trackActivity(handleRunDetection))
+	http.HandleFunc("/api/save-bash-script", trackActivity(handleSaveBashScript))
+	http.HandleFunc("/api/browser-closing", trackActivity(handleBrowserClosing))
+	http.HandleFunc("/api/ping", trackActivity(handlePing))
 	http.HandleFunc("/videos/", handleVideoFiles)
 
-	port := ":8080"
-	fmt.Printf("Starting SoundSplitter server on http://localhost%s\n", port)
-	fmt.Println("Open your browser and navigate to the URL above")
+	// Try ports from 8080 to 8810
+	port := findAvailablePort(8080, 8810)
+	if port == 0 {
+		log.Fatal("No available ports found between 8080 and 8810")
+	}
 
-	log.Fatal(http.ListenAndServe(port, nil))
+	url := fmt.Sprintf("http://localhost:%d", port)
+	fmt.Printf("Starting SoundSplitter server on %s\n", url)
+	fmt.Println("Opening browser...")
+
+	// Open browser
+	openBrowser(url)
+
+	// Set up graceful shutdown
+	setupGracefulShutdown()
+
+	fmt.Println("Server is running. Server will auto-shutdown after 5 minutes of inactivity.")
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
+}
+
+// trackActivity wraps an HTTP handler to track activity
+func trackActivity(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		activityMutex.Lock()
+		lastActivity = time.Now()
+		activityMutex.Unlock()
+
+		fmt.Printf("Activity: %s %s at %s\n", r.Method, r.URL.Path, time.Now().Format("15:04:05"))
+
+		handler(w, r)
+	}
 }
 
 func handleStatic(w http.ResponseWriter, r *http.Request) {
@@ -705,4 +747,105 @@ func handleSaveBashScript(w http.ResponseWriter, r *http.Request) {
 		"message": "Bash script saved successfully",
 		"path":    scriptPath,
 	})
+}
+
+func handleBrowserClosing(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("Browser closing endpoint called - Method: %s, Headers: %v\n", r.Method, r.Header)
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	fmt.Println("Browser window closing detected, shutting down server...")
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Server shutting down"})
+
+	// Give the response a moment to be sent, then exit
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		fmt.Println("Exiting server...")
+		os.Exit(0)
+	}()
+}
+
+func handlePing(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("Ping received at %s\n", time.Now().Format("15:04:05"))
+
+	pingMutex.Lock()
+	lastPingTime = time.Now()
+	pingMutex.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "pong"})
+}
+
+func findAvailablePort(startPort, endPort int) int {
+	for port := startPort; port <= endPort; port++ {
+		addr := fmt.Sprintf(":%d", port)
+		listener, err := net.Listen("tcp", addr)
+		if err == nil {
+			listener.Close()
+			return port
+		}
+	}
+	return 0
+}
+
+func openBrowser(url string) *exec.Cmd {
+	var cmd *exec.Cmd
+
+	switch runtime.GOOS {
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		fmt.Printf("Please open your browser and navigate to: %s\n", url)
+		return nil
+	}
+
+	err := cmd.Start()
+	if err != nil {
+		fmt.Printf("Failed to open browser: %v\n", err)
+		fmt.Printf("Please open your browser and navigate to: %s\n", url)
+		return nil
+	}
+	return cmd
+}
+
+func setupGracefulShutdown() {
+	// Set up signal handling for graceful shutdown
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-c
+		fmt.Println("\nShutting down server gracefully...")
+		os.Exit(0)
+	}()
+
+	// Initialize activity time
+	activityMutex.Lock()
+	lastActivity = time.Now()
+	activityMutex.Unlock()
+
+	// Start a goroutine to monitor for activity
+	go func() {
+		for {
+			time.Sleep(30 * time.Second) // Check every 30 seconds
+
+			activityMutex.RLock()
+			lastAct := lastActivity
+			activityMutex.RUnlock()
+
+			if time.Since(lastAct) > 5*time.Minute { // Shutdown if no activity for 5 minutes
+				fmt.Println("No activity detected for 5 minutes. Shutting down server.")
+				os.Exit(0)
+			}
+		}
+	}()
 }
