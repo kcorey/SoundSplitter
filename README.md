@@ -4,20 +4,64 @@ A tool for detecting applause in videos and suggesting split points for video ed
 
 ## Features
 
-- **Applause Detection**: Automatically detects applause segments in video files
+- **Applause Detection**: Automatically detects applause segments in video files using FFmpeg
 - **Web UI**: Modern, responsive interface for reviewing and managing detected segments
 - **Video Playback**: Click on segments to preview the video around applause times
 - **Video Splitting**: Extract video segments based on selected applause times
 - **Confidence Scoring**: Each detection includes a confidence score
+- **Manual Presenter Input**: Enter speaker names via text input
+- **Auto-shutdown**: Application closes automatically when browser window is closed
 
-## Quick Start
+## Requirements
 
-### 1. Analyze Videos
+- **FFmpeg**: Must be installed and available in your system PATH
+  - **macOS**: `brew install ffmpeg` or download from https://ffmpeg.org/
+  - **Linux**: `sudo apt install ffmpeg` (Ubuntu/Debian) or `sudo yum install ffmpeg` (CentOS/RHEL)
+  - **Windows**: Download from https://ffmpeg.org/ or install via package manager
+  - **Version**: FFmpeg 4.0 or later recommended
+
+## Quick Start (Distribution Version)
+
+1. **Install FFmpeg** (see Requirements above)
+2. **Copy the executable** to the same directory as your video files
+3. **Run the executable** from that directory, it will automatically open a browser window with the app
+4. **Close the browser window** when done - the app will shut down automatically
+
+### Usage
+
+```bash
+# Copy to your video directory
+cp SoundSplitter /path/to/your/videos/
+
+# Run from the video directory
+cd /path/to/your/videos/
+./SoundSplitter
+```
+
+## Development Setup
+
+### Requirements
+
+- **Go**: Version 1.16 or later
+- **FFmpeg**: Must be installed and available in PATH
+- **Modern Browser**: Chrome, Firefox, Safari, or Edge
+
+### Installation
+
+1. **Install Go**: Download from [golang.org](https://golang.org/dl/)
+2. **Install FFmpeg**: 
+   - macOS: `brew install ffmpeg`
+   - Ubuntu: `sudo apt install ffmpeg`
+   - Windows: Download from [ffmpeg.org](https://ffmpeg.org/download.html)
+
+### Development Usage
+
+#### 1. Analyze Videos
 
 First, run the applause detector on your MOV files:
 
 ```bash
-go run applause_detector.go
+go run tools/applause_detector.go
 ```
 
 This will:
@@ -26,7 +70,7 @@ This will:
 - Generate JSON analysis files for each video
 - Display results in the terminal
 
-### 2. Start the Web UI
+#### 2. Start the Web UI
 
 Run the web server:
 
@@ -39,7 +83,7 @@ Then open your browser and navigate to:
 http://localhost:8080
 ```
 
-### 3. Use the Web Interface
+#### 3. Use the Web Interface
 
 The web interface provides:
 
@@ -47,6 +91,8 @@ The web interface provides:
 - **Segment Selection**: Checkboxes to select which segments to use for splitting
 - **Video Player**: Click on any segment to preview the video
 - **Split Button**: Extract video segments based on selected applause times
+- **Presenter Tags**: Drag and drop presenter names onto segments
+- **Manual Input**: Enter presenter names via text input
 
 ## How It Works
 
@@ -54,7 +100,7 @@ The web interface provides:
 
 The system uses FFmpeg's `silencedetect` filter to analyze audio patterns:
 
-1. **Audio Extraction**: Extracts audio from video files
+1. **Audio Extraction**: Extracts audio from video files using FFmpeg
 2. **Volume Analysis**: Detects periods of high activity (non-silence)
 3. **Pattern Recognition**: Identifies applause-like patterns (2-20 second duration)
 4. **Confidence Scoring**: Assigns confidence based on duration characteristics
@@ -69,10 +115,12 @@ When you click "Split Videos", the system:
 
 ## File Structure
 
+### Development
 ```
 SoundSplitter/
-├── applause_detector.go    # Main applause detection program
 ├── ui_server.go           # Web server for the UI
+├── tools/
+│   └── applause_detector.go    # Standalone applause detection program
 ├── index.html             # Web interface
 ├── app.js                 # Frontend JavaScript
 ├── *.MOV                  # Your video files
@@ -80,49 +128,37 @@ SoundSplitter/
 └── *_segment_*.mp4       # Generated video segments
 ```
 
-## Requirements
-
-- **Go**: Version 1.16 or later
-- **FFmpeg**: Must be installed and available in PATH
-- **Modern Browser**: Chrome, Firefox, Safari, or Edge
-
-## Installation
-
-1. **Install Go**: Download from [golang.org](https://golang.org/dl/)
-2. **Install FFmpeg**: 
-   - macOS: `brew install ffmpeg`
-   - Ubuntu: `sudo apt install ffmpeg`
-   - Windows: Download from [ffmpeg.org](https://ffmpeg.org/download.html)
-
-## Usage Examples
-
-### Basic Analysis
-
-```bash
-# Analyze all MOV files in current directory
-go run applause_detector.go
+### Distribution
+```
+YourVideoDirectory/
+├── SoundSplitter          # The executable
+├── video1.mp4            # Your video files
+├── video2.avi
+└── ...                   # Other files
 ```
 
-### Web Interface
+## Supported Platforms
 
-```bash
-# Start the web server
-go run ui_server.go
+- **macOS**: `SoundSplitter` (17MB)
+- **Linux**: `SoundSplitter-linux-amd64` (17MB) 
+- **Windows**: `SoundSplitter-windows-amd64.exe` (17MB)
 
-# Open browser to http://localhost:8080
-```
+## What's Included in Distribution
 
-### Custom Analysis
+The executable contains:
+- Go server with all dependencies
+- Embedded web interface (`index.html`)
+- Embedded JavaScript (`app.js`)
+- All required Go modules
 
-The applause detector supports several options:
+## API Endpoints
 
-```bash
-# Show help
-go run applause_detector.go --help
-
-# Save comparison frames (for debugging)
-go run applause_detector.go --save-frames
-```
+- `GET /api/analyzed-files`: Returns list of analyzed files and segments
+- `POST /api/split-video`: Creates video segments
+- `GET /api/presenters`: Returns manually entered presenter names
+- `GET /api/directory`: Returns list of all files in current directory
+- `GET /api/ping`: Health check endpoint
+- `GET /videos/{filename}`: Serves video files for playback
 
 ## Output Files
 
@@ -140,27 +176,20 @@ go run applause_detector.go --save-frames
 ### Common Issues
 
 1. **FFmpeg not found**: Install FFmpeg and ensure it's in your PATH
-2. **No MOV files found**: Ensure your video files have .MOV extension
-3. **Server won't start**: Check if port 8080 is already in use
-4. **Video won't play**: Ensure video files are in the same directory as the server
+2. **"Oops! Didn't find any movie files"**: Copy the executable to the directory with your video files
+3. **Port already in use**: The app will automatically find an available port
+4. **Browser doesn't open**: Manually open `http://localhost:8081` (or the port shown in terminal)
+5. **Video won't play**: Ensure video files are in the same directory as the server
 
 ### Debug Mode
 
 To save intermediate files for debugging:
 
 ```bash
-go run applause_detector.go --save-frames
+go run tools/applause_detector.go --save-frames
 ```
 
 This will save frame images used for analysis.
-
-## API Endpoints
-
-The web server provides these API endpoints:
-
-- `GET /api/analyzed-files`: Returns list of analyzed files and segments
-- `POST /api/split-video`: Creates video segments
-- `GET /videos/{filename}`: Serves video files for playback
 
 ## Contributing
 
