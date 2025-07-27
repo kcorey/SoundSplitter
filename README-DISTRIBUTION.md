@@ -3,9 +3,8 @@
 ## Quick Start
 
 1. **Copy the executable** to the same directory as your video files
-2. **Run the executable** from that directory
-3. **Open your browser** - it will automatically open to the app
-4. **Close the browser window** when done - the app will shut down automatically
+2. **Run the executable** from that directory, it will automatically open a browser window with the app.
+3. **Close the browser window** when done - the app will shut down automatically
 
 ## Usage
 

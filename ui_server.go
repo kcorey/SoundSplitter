@@ -835,6 +835,27 @@ func handleBrowserClosing(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		fmt.Println("Exiting server...")
+
+		// On macOS, try to close the terminal window
+		if runtime.GOOS == "darwin" {
+			// Multiple attempts to close the terminal
+			for i := 0; i < 3; i++ {
+				// Kill the entire process group to close the terminal
+				pgid, err := syscall.Getpgid(0)
+				if err == nil {
+					syscall.Kill(-pgid, syscall.SIGTERM)
+				}
+
+				// Also try to kill the parent process
+				parentPID := os.Getppid()
+				if parentPID > 1 {
+					syscall.Kill(parentPID, syscall.SIGTERM)
+				}
+
+				time.Sleep(200 * time.Millisecond)
+			}
+		}
+
 		os.Exit(0)
 	}()
 }

@@ -49,14 +49,7 @@ class SoundSplitterUI {
             this.currentSegment.textContent = 'Video playback ended';
         });
         
-        // Parse presenters button
-        document.getElementById('parsePresentersBtn').addEventListener('click', () => {
-            const presenterInput = document.getElementById('presenterInput');
-            const presenterString = presenterInput.value.trim();
-            if (presenterString) {
-                this.parsePresenterString(presenterString);
-            }
-        });
+
         
         // Keyboard shortcuts for undo
         document.addEventListener('keydown', (e) => {
@@ -128,7 +121,17 @@ class SoundSplitterUI {
                 throw new Error('Failed to parse presenters');
             }
             
-            this.presenters = await response.json();
+            const newPresenters = await response.json();
+            
+            // Append new presenters to existing ones, avoiding duplicates
+            if (this.presenters && this.presenters.length > 0) {
+                const existingNames = new Set(this.presenters.map(p => p.presenter));
+                const uniqueNewPresenters = newPresenters.filter(p => !existingNames.has(p.presenter));
+                this.presenters = [...this.presenters, ...uniqueNewPresenters];
+            } else {
+                this.presenters = newPresenters;
+            }
+            
             this.renderPresenterTags();
             return this.presenters;
         } catch (error) {
@@ -158,17 +161,9 @@ class SoundSplitterUI {
     }
 
     renderPresenterTags() {
-        if (!this.presenters || this.presenters.length === 0) {
-            document.getElementById('presenterTags').innerHTML = `
-                <div class="alert alert-info">
-                    <i class="fas fa-info-circle me-2"></i>
-                    No presenters found in PDF files.
-                </div>
-            `;
-            return;
-        }
-
-        const uniquePresenters = [...new Set(this.presenters.map(p => p.presenter))].sort();
+        const uniquePresenters = this.presenters && this.presenters.length > 0 
+            ? [...new Set(this.presenters.map(p => p.presenter))].sort() 
+            : [];
         const toastmaster = this.getToastmaster();
         
         document.getElementById('presenterTags').innerHTML = `
@@ -213,6 +208,28 @@ class SoundSplitterUI {
 
                 </div>
             </div>
+            
+            <!-- Manual Presenter Input -->
+            <div class="mt-4 p-3 border-top">
+                <label for="presenterInput" class="form-label">
+                    Enter Presenter Names (comma-separated):
+                    <i class="fas fa-info-circle text-primary ms-1" 
+                       style="cursor: pointer;" 
+                       data-bs-toggle="modal" 
+                       data-bs-target="#presenterInfoModal"></i>
+                </label>
+                <div class="input-group">
+                    <input type="text" class="form-control" id="presenterInput" 
+                           placeholder="e.g., Aleesha & George, Patricia, Drew, Liam, Fin, Kate & Sims, Ciaran, Som, Jess, Jo, Chris, Kishan, Joy, Katie, Tim, Russel, Ken">
+                    <button class="btn btn-primary" type="button" id="parsePresentersBtn">
+                        <i class="fas fa-parse me-1"></i>
+                        Parse Names
+                    </button>
+                </div>
+                <small class="form-text text-muted">
+                    Enter presenter names separated by commas. Names with "&" will be treated as a single presenter.
+                </small>
+            </div>
         `;
 
         // Initialize drag and drop after rendering presenter tags
@@ -220,6 +237,18 @@ class SoundSplitterUI {
         
         // Initialize sensitivity slider
         this.initializeSensitivitySlider();
+        
+        // Set up parse presenters button event listener
+        const parsePresentersBtn = document.getElementById('parsePresentersBtn');
+        if (parsePresentersBtn) {
+            parsePresentersBtn.addEventListener('click', () => {
+                const presenterInput = document.getElementById('presenterInput');
+                const presenterString = presenterInput.value.trim();
+                if (presenterString) {
+                    this.parsePresenterString(presenterString);
+                }
+            });
+        }
     }
 
     initializeDragAndDrop() {
@@ -394,7 +423,7 @@ class SoundSplitterUI {
                     <div class="d-flex justify-content-between align-items-center">
                         <h6 class="mb-0 text-muted">
                             <i class="fas fa-video me-2"></i>
-                            ${file.filename}
+                            ${file.filename.split('/').pop()}
                         </h6>
                         <div class="default-presenter">
                             ${defaultPresenter ? `
