@@ -325,6 +325,28 @@
                                 </h5>
                             </div>
                             <div class="card-body">
+                                <!-- Manual Presenter Input -->
+                                <div class="mb-3">
+                                    <label for="presenterInput" class="form-label">
+                                        Enter Presenter Names (comma-separated):
+                                        <i class="fas fa-info-circle text-primary ms-1" 
+                                           style="cursor: pointer;" 
+                                           data-bs-toggle="modal" 
+                                           data-bs-target="#presenterInfoModal"></i>
+                                    </label>
+                                    <div class="input-group">
+                                        <input type="text" class="form-control" id="presenterInput" 
+                                               placeholder="e.g., Aleesha & George, Patricia, Drew, Liam, Fin, Kate & Sims, Ciaran, Som, Jess, Jo, Chris, Kishan, Joy, Katie, Tim, Russel, Ken">
+                                        <button class="btn btn-primary" type="button" id="parsePresentersBtn">
+                                            <i class="fas fa-parse me-1"></i>
+                                            Parse Names
+                                        </button>
+                                    </div>
+                                    <small class="form-text text-muted">
+                                        Enter presenter names separated by commas. Names with "&" will be treated as a single presenter.
+                                    </small>
+                                </div>
+                                
                                 <div id="presenterTags">
                                     <div class="text-center text-muted">
                                         <i class="fas fa-spinner fa-spin me-2"></i>
@@ -460,8 +482,19 @@
         // Check if any analyzed files exist
         function checkFileStatus() {
             fetch('/api/analyzed-files')
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.json();
+                })
                 .then(data => {
+                    // Ensure data is an array
+                    if (!Array.isArray(data)) {
+                        console.error('Expected array but got:', typeof data, data);
+                        data = [];
+                    }
+                    
                     if (data.length === 0) {
                         // No files found, show instructions
                         fileStatusCard.style.display = 'block';
@@ -501,5 +534,34 @@
         
         console.log('Browser close detection script loaded');
     </script>
+    
+    <!-- Presenter Info Modal -->
+    <div class="modal fade" id="presenterInfoModal" tabindex="-1" aria-labelledby="presenterInfoModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="presenterInfoModalLabel">
+                        <i class="fas fa-info-circle me-2"></i>
+                        How to Extract Presenter Names
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>To extract presenter names from a PDF agenda:</strong></p>
+                    <ol>
+                        <li>Drag the PDF into ChatGPT</li>
+                        <li>Run this prompt:</li>
+                    </ol>
+                    <div class="bg-light p-3 rounded">
+                        <code>This file contains a table. Extract the people's names. Return all the names as comma-separated values.</code>
+                    </div>
+                    <p class="mt-3">Copy the list of names from ChatGPT and paste it into the input field above.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html> 

@@ -49,6 +49,15 @@ class SoundSplitterUI {
             this.currentSegment.textContent = 'Video playback ended';
         });
         
+        // Parse presenters button
+        document.getElementById('parsePresentersBtn').addEventListener('click', () => {
+            const presenterInput = document.getElementById('presenterInput');
+            const presenterString = presenterInput.value.trim();
+            if (presenterString) {
+                this.parsePresenterString(presenterString);
+            }
+        });
+        
         // Keyboard shortcuts for undo
         document.addEventListener('keydown', (e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
@@ -99,17 +108,32 @@ class SoundSplitterUI {
             
             this.presenters = await response.json();
             this.renderPresenterTags();
-            
-            // Try to load detected toastmaster
-            await this.loadDetectedToastmaster();
         } catch (error) {
             console.error('Error loading presenters:', error);
-            document.getElementById('presenterTags').innerHTML = `
-                <div class="alert alert-warning">
-                    <i class="fas fa-exclamation-triangle me-2"></i>
-                    No presenter data found. PDF files will be parsed if available.
-                </div>
-            `;
+            this.presenters = [];
+        }
+    }
+
+    async parsePresenterString(presenterString) {
+        try {
+            const response = await fetch('/api/parse-presenters', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ presenterString })
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to parse presenters');
+            }
+            
+            this.presenters = await response.json();
+            this.renderPresenterTags();
+            return this.presenters;
+        } catch (error) {
+            console.error('Error parsing presenters:', error);
+            return [];
         }
     }
 
