@@ -95,6 +95,8 @@
             margin-bottom: 2px;
         }
         
+
+        
         .segment-item-remove {
             width: 24px;
             height: 24px;
@@ -238,8 +240,25 @@
 </head>
 <body>
     <div class="container-fluid">
-        <div class="main-content">
-            <div class="row">
+        <div class="row">
+            <div class="col-12">
+                <div class="card mb-3" id="fileStatusCard" style="display: none;">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-info-circle me-2"></i>
+                            File Status
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="fileStatusMessage" class="text-center">
+                            <!-- Status message will be populated here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
                 <!-- Header -->
                 <div class="col-12">
                     <div class="bg-primary text-white p-3 mb-4">
@@ -400,14 +419,23 @@
             });
         }
 
-        // Multiple event listeners to catch different scenarios
-        window.addEventListener('beforeunload', notifyServerClosing);
-        window.addEventListener('unload', notifyServerClosing);
-        window.addEventListener('pagehide', notifyServerClosing);
+        // Only notify when actually closing, not on page load
+        let isPageClosing = false;
+        
+        window.addEventListener('beforeunload', function() {
+            isPageClosing = true;
+            notifyServerClosing();
+        });
+        
+        window.addEventListener('unload', function() {
+            if (isPageClosing) {
+                notifyServerClosing();
+            }
+        });
         
         // Also try to detect when the page becomes hidden
         document.addEventListener('visibilitychange', function() {
-            if (document.visibilityState === 'hidden') {
+            if (document.visibilityState === 'hidden' && isPageClosing) {
                 console.log('Page hidden, notifying server...');
                 notifyServerClosing();
             }
@@ -424,6 +452,52 @@
                     console.log('Ping failed:', error);
                 });
         }, 5000); // Ping every 5 seconds
+        
+        // File status checker
+        const fileStatusCard = document.getElementById('fileStatusCard');
+        const fileStatusMessage = document.getElementById('fileStatusMessage');
+        
+        // Check if any analyzed files exist
+        function checkFileStatus() {
+            fetch('/api/analyzed-files')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.length === 0) {
+                        // No files found, show instructions
+                        fileStatusCard.style.display = 'block';
+                        fileStatusMessage.innerHTML = `
+                            <div class="alert alert-info">
+                                <h5><i class="fas fa-info-circle me-2"></i>No video files found</h5>
+                                <p>To use SoundSplitter:</p>
+                                <ol>
+                                    <li>Copy the SoundSplitter application to the same directory as your video files</li>
+                                    <li>Run the application from that directory</li>
+                                    <li>The app will automatically detect and analyze video files (.mp4, .avi, .mov)</li>
+                                </ol>
+                                <p><strong>Current directory:</strong> The server is running in the directory where you started it.</p>
+                                <p><strong>Supported formats:</strong> MP4, AVI, MOV, MKV, WMV</p>
+                            </div>
+                        `;
+                    } else {
+                        // Files found, hide the status card
+                        fileStatusCard.style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking file status:', error);
+                    fileStatusCard.style.display = 'block';
+                    fileStatusMessage.innerHTML = `
+                        <div class="alert alert-info">
+                            <h5><i class="fas fa-info-circle me-2"></i>Oops!</h5>
+                            <p>Didn't find any movie files or PDF schedules to use in this directory.</p>
+                            <p><strong>Copy me to the same place as the movie files.</strong></p>
+                        </div>
+                    `;
+                });
+        }
+        
+        // Check file status when page loads
+        checkFileStatus();
         
         console.log('Browser close detection script loaded');
     </script>

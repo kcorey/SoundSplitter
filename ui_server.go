@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/unidoc/unipdf/v3/common/license"
 	"github.com/unidoc/unipdf/v3/extractor"
 	"github.com/unidoc/unipdf/v3/model"
 )
@@ -68,6 +69,9 @@ type Presenter struct {
 }
 
 func main() {
+	// Set up UniPDF license
+	setupUniPDFLicense()
+
 	// Serve static files
 	http.HandleFunc("/", handleStatic)
 
@@ -80,6 +84,7 @@ func main() {
 	http.HandleFunc("/api/save-bash-script", trackActivity(handleSaveBashScript))
 	http.HandleFunc("/api/browser-closing", trackActivity(handleBrowserClosing))
 	http.HandleFunc("/api/ping", trackActivity(handlePing))
+
 	http.HandleFunc("/videos/", handleVideoFiles)
 
 	// Try ports from 8080 to 8810
@@ -100,6 +105,29 @@ func main() {
 
 	fmt.Println("Server is running. Server will auto-shutdown after 5 minutes of inactivity.")
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), nil))
+}
+
+func setupUniPDFLicense() {
+	// Try to load license from environment variable
+	licenseKey := os.Getenv("UNIPDF_LICENSE_KEY")
+	customerName := os.Getenv("UNIPDF_CUSTOMER_NAME")
+
+	if licenseKey != "" {
+		err := license.SetLicenseKey(licenseKey, customerName)
+		if err != nil {
+			fmt.Printf("Warning: Failed to set UniPDF license: %v\n", err)
+			fmt.Println("PDF parsing will be limited. Get a free trial license from https://unidoc.io")
+		} else {
+			fmt.Println("UniPDF license loaded successfully")
+		}
+	} else {
+		fmt.Println("No UniPDF license found. PDF parsing will be limited.")
+		fmt.Println("To enable full PDF parsing:")
+		fmt.Println("1. Get a free trial license from https://unidoc.io")
+		fmt.Println("2. Set the environment variables:")
+		fmt.Println("   export UNIPDF_LICENSE_KEY='your-license-key'")
+		fmt.Println("   export UNIPDF_CUSTOMER_NAME='your-customer-name'")
+	}
 }
 
 // trackActivity wraps an HTTP handler to track activity
