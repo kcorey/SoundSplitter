@@ -165,11 +165,76 @@ The executable contains:
 ### Analysis Files
 - `*_applause_analysis.json`: Detailed analysis results
 - Contains segment times, durations, and confidence scores
+- **Location**: Same directory as the executable
 
 ### Video Segments
-- `*_segment_001.mp4`: First video segment
-- `*_segment_002.mp4`: Second video segment
-- etc.
+- `Tag-1.mov`: First video segment (if tags are applied)
+- `Tag-2.mov`: Second video segment (if tags are applied)
+- `filename_segment_001.mov`: Fallback naming (if no tags)
+- **Location**: `extracted/` subdirectory
+
+### Example Directory Structure After Running
+```
+YourVideoDirectory/
+├── SoundSplitter                    # The executable
+├── IMG_2333.MOV                     # Original video
+├── IMG_2333.MOV_applause_analysis.json  # Analysis results (same directory)
+├── extracted/                       # Subdirectory for output files
+│   ├── Tag-1.mov                   # Video segments
+│   ├── Tag-2.mov
+│   ├── extract_videos.sh           # Bash script (if generated)
+│   └── ...
+└── ...
+```
+
+## Using Tags and Presenters
+
+### Adding Presenter Names
+
+1. **Enter Presenter Names**: In the web interface, scroll down to the "Enter Presenter Names" section
+2. **Type Names**: Enter names separated by commas (e.g., "Aleesha & George, Patricia, Drew, Liam")
+3. **Parse Names**: Click the "Parse Names" button to create draggable tags
+4. **Names with "&"**: Will be treated as a single presenter (e.g., "Aleesha & George" becomes one tag)
+
+### Setting the Toastmaster
+
+1. **Find the Toastmaster Drop Zone**: Look for the dashed border area in the presenter tags section
+2. **Drag a Presenter**: Drag any presenter tag to the toastmaster drop zone
+3. **Apply to All**: Click "Apply to All Segments" to automatically add the toastmaster to every segment
+
+### Adding Tags to Segments
+
+#### Method 1: Drag and Drop onto Major Headers
+1. **Find the Video Header**: Each video file has a header with the filename
+2. **Drag a Presenter**: Drag any presenter tag onto the video header
+3. **First Person**: This sets the default presenter for the first person in that video
+4. **All Segments**: This presenter will be applied to all segments in that video
+
+#### Method 2: Drag and Drop onto Individual Segments
+1. **Find a Segment**: Each applause segment is shown with start/end times
+2. **Drag a Presenter**: Drag any presenter tag onto a specific segment
+3. **New Person**: This represents the person who comes on after that applause
+4. **Multiple Tags**: You can add multiple presenters to a single segment
+
+### Tag Naming for Output Files
+
+- **Tagged Segments**: Files are named `Tag-1.mov`, `Tag-2.mov`, etc.
+- **Untagged Segments**: Files are named `filename_segment_001.mov`, etc.
+- **Multiple Tags**: If a segment has multiple tags, the first tag is used for naming
+
+### Custom Tags
+
+1. **Click "Custom Tag"**: In the presenter tags section, click the "Custom Tag" button
+2. **Enter Custom Name**: Type in any custom presenter name
+3. **Use Like Other Tags**: Drag and drop custom tags just like regular presenter tags
+
+### Tips for Effective Tagging
+
+- **Start with Toastmaster**: Set the toastmaster first, then apply to all segments
+- **Tag Major Transitions**: Focus on segments where the main speaker changes
+- **Use Consistent Names**: Keep presenter names consistent across all videos
+- **Preview Segments**: Click on segments to preview the video before tagging
+- **Check Output Names**: The final video files will be named based on your tags
 
 ## Troubleshooting
 
