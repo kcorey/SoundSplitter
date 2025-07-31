@@ -4,6 +4,9 @@
 # Build artifacts
 ui_server
 applause_detector
+SoundSplitter
+SoundSplitter-linux-amd64
+SoundSplitter-windows-amd64.exe 
 *.exe
 
 # Extracted video segments

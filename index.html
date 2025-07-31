@@ -110,52 +110,32 @@
             border: 1px solid #dc3545;
         }
         
-        /* Responsive height layout */
+        /* Fixed layout with scrollable content and fixed footer */
         body {
             height: 100vh;
-            display: flex;
-            flex-direction: column;
             margin: 0;
             padding: 0;
+            overflow: hidden;
+            max-width: 100vw;
         }
         
         .container-fluid {
-            height: 100%;
+            height: 100vh;
             display: flex;
             flex-direction: column;
             padding: 0;
+            overflow-x: hidden;
         }
         
-        .main-content {
+        .scrollable-content {
             flex: 1;
-            display: flex;
-            flex-direction: column;
-            min-height: 0;
-            overflow: hidden;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding-bottom: 20px;
         }
         
         .content-row {
-            flex: 1;
-            min-height: 0;
-            overflow: hidden;
-            height: 100%;
-        }
-        
-        .content-row .card {
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .content-row .card-body {
-            flex: 1;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .content-row .card-body > div {
-            overflow: auto;
+            margin-bottom: 0;
         }
         
         .file-list-container {
@@ -191,10 +171,68 @@
         }
         
         .split-videos-section {
-            flex-shrink: 0;
             background-color: #f8f9fa;
             border-top: 1px solid #dee2e6;
             padding: 1rem 0;
+            flex-shrink: 0;
+            position: sticky;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+        }
+        
+        /* Ensure the right panel content doesn't overlap */
+        .right-panel-content {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        
+        .right-panel-content .card {
+            flex-shrink: 0;
+            margin-bottom: 1rem;
+            min-height: fit-content;
+        }
+        
+        .right-panel-content .card:last-child {
+            margin-bottom: 0;
+        }
+        
+        /* Ensure video player card has proper height */
+        .video-player-card {
+            min-height: 300px;
+        }
+        
+        /* Ensure presenter tags card has proper height */
+        .presenter-tags-card {
+            min-height: 200px;
+        }
+        
+        /* Ensure detection sensitivity card has proper height */
+        .detection-sensitivity-card {
+            min-height: 120px;
+        }
+        
+        /* Responsive adjustments for smaller screens */
+        @media (max-width: 768px) {
+            .right-panel-content .card {
+                margin-bottom: 0.5rem;
+            }
+            
+            .split-videos-section {
+                margin-top: 1rem;
+            }
+        }
+        
+        @media (max-width: 576px) {
+            .content-row {
+                margin-bottom: 1rem;
+            }
+            
+            .split-videos-section {
+                margin-top: 0.5rem;
+            }
         }
         
 
@@ -240,39 +278,40 @@
 </head>
 <body>
     <div class="container-fluid">
-        <div class="row">
-            <div class="col-12">
-                <div class="card mb-3" id="fileStatusCard" style="display: none;">
-                    <div class="card-header">
-                        <h5 class="mb-0">
-                            <i class="fas fa-info-circle me-2"></i>
-                            File Status
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div id="fileStatusMessage" class="text-center">
-                            <!-- Status message will be populated here -->
+        <div class="scrollable-content">
+            <div class="row">
+                <div class="col-12">
+                    <div class="card mb-3" id="fileStatusCard" style="display: none;">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                <i class="fas fa-info-circle me-2"></i>
+                                File Status
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="fileStatusMessage" class="text-center">
+                                <!-- Status message will be populated here -->
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
-        
-        <div class="row">
-                <!-- Header -->
-                <div class="col-12">
-                    <div class="bg-primary text-white p-3 mb-4">
-                        <h1 class="mb-0">
-                            <i class="fas fa-cut me-2"></i>
-                            SoundSplitter - Applause Detection UI
-                        </h1>
+            
+            <div class="row">
+                    <!-- Header -->
+                    <div class="col-12">
+                        <div class="bg-primary text-white p-3 mb-4">
+                            <h1 class="mb-0">
+                                <i class="fas fa-cut me-2"></i>
+                                SoundSplitter - Applause Detection UI
+                            </h1>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <div class="row content-row">
+                <div class="row content-row">
                 <!-- Segments List -->
-                <div class="col-auto" style="max-width: 500px; min-width: 350px;">
+                <div class="col-lg-4 col-md-5 col-sm-12">
                     <div class="card segments-list-card">
                         <div class="card-header">
                             <h5 class="mb-0">
@@ -292,10 +331,10 @@
                 </div>
 
                 <!-- Video Player and Presenter Tags -->
-                <div class="col">
-                    <div class="d-flex flex-column h-100">
+                <div class="col-lg-8 col-md-7 col-sm-12">
+                    <div class="right-panel-content">
                         <!-- Video Player -->
-                        <div class="card">
+                        <div class="card video-player-card">
                             <div class="card-header">
                                 <h5 class="mb-0">
                                     <i class="fas fa-play me-2"></i>
@@ -317,12 +356,16 @@
                         </div>
                         
                         <!-- Presenter Tags -->
-                        <div class="card mt-3">
-                            <div class="card-header">
+                        <div class="card presenter-tags-card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
                                 <h5 class="mb-0">
                                     <i class="fas fa-users me-2"></i>
                                     Presenter Tags
                                 </h5>
+                                <i class="fas fa-trash text-danger" 
+                                   style="cursor: pointer;" 
+                                   title="Delete all tags"
+                                   onclick="app.splitterUI.deleteAllTags()"></i>
                             </div>
                             <div class="card-body">
                                 <div id="presenterTags">
@@ -335,7 +378,7 @@
                         </div>
                         
                         <!-- Detection Sensitivity -->
-                        <div class="card mt-3">
+                        <div class="card detection-sensitivity-card">
                             <div class="card-header">
                                 <h5 class="mb-0">
                                     <i class="fas fa-sliders-h me-2"></i>
@@ -358,10 +401,10 @@
                     </div>
                 </div>
             </div>
-                    </div>
-            
-            <!-- Split Button -->
-            <div class="split-videos-section">
+        </div>
+        
+        <!-- Fixed Split Videos Footer -->
+        <div class="split-videos-section">
                 <div class="row">
                     <div class="col-12">
                         <div class="card">

@@ -60,38 +60,6 @@ class SoundSplitterUI {
         });
     }
 
-    async loadAnalyzedFiles() {
-        // Try to load saved state first
-        const stateLoaded = this.loadState();
-        
-        if (stateLoaded) {
-            // Use saved state
-            this.renderFileList();
-            this.updateSplitButton();
-            return;
-        }
-        
-        // Fall back to loading from server
-        try {
-            const response = await fetch('/api/analyzed-files');
-            if (!response.ok) {
-                throw new Error('Failed to load analyzed files');
-            }
-            
-            this.analyzedFiles = await response.json();
-            this.renderFileList();
-            this.updateSplitButton();
-        } catch (error) {
-            console.error('Error loading analyzed files:', error);
-            this.fileList.innerHTML = `
-                <div class="alert alert-warning">
-                    <i class="fas fa-exclamation-triangle me-2"></i>
-                    No analyzed files found. Please run the applause detector first.
-                </div>
-            `;
-        }
-    }
-
     async loadPresenters() {
         try {
             const response = await fetch('/api/presenters');
@@ -133,6 +101,10 @@ class SoundSplitterUI {
             }
             
             this.renderPresenterTags();
+            
+            // Save state after adding presenters
+            this.saveState();
+            
             return this.presenters;
         } catch (error) {
             console.error('Error parsing presenters:', error);
@@ -171,6 +143,10 @@ class SoundSplitterUI {
                 ${uniquePresenters.map(presenter => `
                     <span class="badge bg-info me-2 mb-2" draggable="true" data-presenter="${presenter}">
                         ${presenter}
+                        <i class="fas fa-times ms-1" 
+                           style="cursor: pointer; font-size: 0.8em;" 
+                           title="Delete this tag"
+                           onclick="app.splitterUI.deletePresenterTag('${presenter}')"></i>
                     </span>
                 `).join('')}
                 <div class="mt-3">
@@ -383,6 +359,42 @@ class SoundSplitterUI {
             toastmasterDropZone.addEventListener('dragleave', toastmasterDropZone._dragLeaveHandler);
             toastmasterDropZone.addEventListener('drop', toastmasterDropZone._dropHandler);
             toastmasterDropZone.addEventListener('click', toastmasterDropZone._clickHandler);
+        }
+
+        // Make trash can droppable for deleting tags
+        const trashCan = document.querySelector('.fa-trash');
+        if (trashCan) {
+            // Remove existing event listeners to avoid duplicates
+            trashCan.removeEventListener('dragover', trashCan._dragOverHandler);
+            trashCan.removeEventListener('dragleave', trashCan._dragLeaveHandler);
+            trashCan.removeEventListener('drop', trashCan._dropHandler);
+            
+            // Create new handlers
+            trashCan._dragOverHandler = (e) => {
+                e.preventDefault();
+                trashCan.style.color = '#dc3545';
+                trashCan.style.transform = 'scale(1.2)';
+            };
+            
+            trashCan._dragLeaveHandler = (e) => {
+                trashCan.style.color = '#dc3545';
+                trashCan.style.transform = 'scale(1)';
+            };
+            
+            trashCan._dropHandler = (e) => {
+                e.preventDefault();
+                trashCan.style.color = '#dc3545';
+                trashCan.style.transform = 'scale(1)';
+                const presenter = e.dataTransfer.getData('text/plain');
+                if (presenter && presenter !== 'custom') {
+                    console.log('Dropping presenter on trash can:', presenter);
+                    this.deletePresenterTag(presenter);
+                }
+            };
+            
+            trashCan.addEventListener('dragover', trashCan._dragOverHandler);
+            trashCan.addEventListener('dragleave', trashCan._dragLeaveHandler);
+            trashCan.addEventListener('drop', trashCan._dropHandler);
         }
     }
 
@@ -756,7 +768,7 @@ class SoundSplitterUI {
 
     async generateBashScript(extractionPlan) {
         try {
-            const scriptContent = `#!/bin/bash
+            let scriptContent = `#!/bin/bash
 # SoundSplitter Video Extraction Script
 # Generated on ${new Date().toISOString()}
 # This script contains ffmpeg commands to extract video segments
@@ -1042,6 +1054,8 @@ echo "Extracted: ${item.outputName}"
 
             const result = await response.json();
             console.log(`Created segment: ${result.outputFile}`);
+            console.log(`Full path: ${result.outputFile}`);
+            console.log(`Check the 'extracted/' directory for your video segments`);
         } catch (error) {
             console.error('Error creating video segment:', error);
             this.splitStatus.textContent = `Error creating segment: ${error.message}`;
@@ -1079,15 +1093,22 @@ echo "Extracted: ${item.outputName}"
     addToastmasterToAllSegments() {
         if (!this.toastmaster) return;
         
+        if (!this.analyzedFiles || !Array.isArray(this.analyzedFiles)) {
+            console.warn('No analyzed files available for adding toastmaster');
+            return;
+        }
+        
         this.analyzedFiles.forEach(file => {
-            file.applause_segments.forEach(segment => {
-                if (!segment.tags) {
-                    segment.tags = [];
-                }
-                if (!segment.tags.includes(this.toastmaster)) {
-                    segment.tags.push(this.toastmaster);
-                }
-            });
+            if (file && file.applause_segments && Array.isArray(file.applause_segments)) {
+                file.applause_segments.forEach(segment => {
+                    if (!segment.tags) {
+                        segment.tags = [];
+                    }
+                    if (!segment.tags.includes(this.toastmaster)) {
+                        segment.tags.push(this.toastmaster);
+                    }
+                });
+            }
         });
         
         this.renderFileList();
@@ -1095,6 +1116,85 @@ echo "Extracted: ${item.outputName}"
         
         // Save state after adding toastmaster to all segments
         this.saveState();
+    }
+
+    // Tag deletion methods
+    deletePresenterTag(presenterName) {
+        if (confirm(`Are you sure you want to delete the tag "${presenterName}"?`)) {
+            // Remove from presenters list
+            this.presenters = this.presenters.filter(p => p.presenter !== presenterName);
+            
+            // Remove this tag from all segments
+            if (this.analyzedFiles) {
+                this.analyzedFiles.forEach(file => {
+                    if (file.applause_segments) {
+                        file.applause_segments.forEach(segment => {
+                            if (segment.tags) {
+                                segment.tags = segment.tags.filter(tag => tag !== presenterName);
+                            }
+                        });
+                    }
+                });
+            }
+            
+            // Clear default presenters for this presenter
+            if (this.defaultPresenters) {
+                Object.keys(this.defaultPresenters).forEach(filename => {
+                    if (this.defaultPresenters[filename] === presenterName) {
+                        delete this.defaultPresenters[filename];
+                    }
+                });
+                localStorage.setItem('defaultPresenters', JSON.stringify(this.defaultPresenters));
+            }
+            
+            // Clear toastmaster if it was this presenter
+            if (this.toastmaster === presenterName) {
+                this.toastmaster = null;
+            }
+            
+            // Re-render everything
+            this.renderPresenterTags();
+            this.renderFileList();
+            
+            // Save state
+            this.saveState();
+            
+            console.log(`Deleted presenter tag: ${presenterName}`);
+        }
+    }
+    
+    deleteAllTags() {
+        if (confirm('Are you sure you want to delete all tags? This will remove all presenter tags and clear all segment assignments.')) {
+            // Clear presenters list
+            this.presenters = [];
+            
+            // Clear all tags from all segments
+            if (this.analyzedFiles) {
+                this.analyzedFiles.forEach(file => {
+                    if (file.applause_segments) {
+                        file.applause_segments.forEach(segment => {
+                            segment.tags = [];
+                        });
+                    }
+                });
+            }
+            
+            // Clear default presenters
+            this.defaultPresenters = {};
+            localStorage.setItem('defaultPresenters', JSON.stringify(this.defaultPresenters));
+            
+            // Clear toastmaster
+            this.toastmaster = null;
+            
+            // Re-render everything
+            this.renderPresenterTags();
+            this.renderFileList();
+            
+            // Save state
+            this.saveState();
+            
+            console.log('Deleted all tags');
+        }
     }
 
     // Custom tag methods
@@ -1509,28 +1609,55 @@ echo "Extracted: ${item.outputName}"
     
     // State persistence methods
     saveState() {
+        // Create a list of current video files for comparison
+        const currentVideoFiles = this.analyzedFiles ? this.analyzedFiles.map(file => file.filename).sort() : [];
+        
         const state = {
             analyzedFiles: this.analyzedFiles,
             toastmaster: this.toastmaster,
+            presenters: this.presenters || [],
+            videoFiles: currentVideoFiles,
             timestamp: new Date().toISOString()
         };
         
         try {
+            // Try localStorage first (larger capacity)
             const stateJson = JSON.stringify(state);
-            document.cookie = `${this.stateCookieName}=${encodeURIComponent(stateJson)}; path=/; max-age=2592000`; // 30 days
-            console.log('State saved to cookie');
+            console.log('Saving state to localStorage with key:', this.stateCookieName);
+            console.log('State size:', stateJson.length, 'characters');
+            localStorage.setItem(this.stateCookieName, stateJson);
+            console.log('State saved to localStorage');
+            
+            // Verify it was saved
+            const savedState = localStorage.getItem(this.stateCookieName);
+            if (savedState) {
+                console.log('Verified state saved successfully, length:', savedState.length);
+            } else {
+                console.error('Failed to verify state was saved!');
+            }
         } catch (error) {
-            console.error('Failed to save state:', error);
+            console.error('Failed to save state to localStorage:', error);
+            // Fallback to cookie if localStorage fails
+            try {
+                const stateJson = JSON.stringify(state);
+                const cookieValue = `${this.stateCookieName}=${encodeURIComponent(stateJson)}; path=/; max-age=2592000`; // 30 days
+                document.cookie = cookieValue;
+                console.log('State saved to cookie (fallback)');
+                console.log('Cookie size:', cookieValue.length, 'characters');
+            } catch (cookieError) {
+                console.error('Failed to save state to cookie:', cookieError);
+            }
         }
     }
     
     loadState() {
         try {
-            const cookies = document.cookie.split(';');
-            const stateCookie = cookies.find(cookie => cookie.trim().startsWith(`${this.stateCookieName}=`));
+            // Try localStorage first
+            console.log('Checking localStorage for key:', this.stateCookieName);
+            const stateJson = localStorage.getItem(this.stateCookieName);
             
-            if (stateCookie) {
-                const stateJson = decodeURIComponent(stateCookie.split('=')[1]);
+            if (stateJson) {
+                console.log('Found state in localStorage, length:', stateJson.length);
                 const state = JSON.parse(stateJson);
                 
                 // Check if the state is recent (within last 7 days)
@@ -1539,13 +1666,130 @@ echo "Extracted: ${item.outputName}"
                 const daysDiff = (now - stateDate) / (1000 * 60 * 60 * 24);
                 
                 if (daysDiff <= 7) {
-                    this.analyzedFiles = state.analyzedFiles || [];
-                    this.toastmaster = state.toastmaster || null;
-                    console.log('State loaded from cookie');
-                    return true;
+                    // Check if current video files match saved video files
+                    const currentVideoFiles = this.analyzedFiles ? this.analyzedFiles.map(file => file.filename).sort() : [];
+                    const savedVideoFiles = state.videoFiles || [];
+                    
+                    console.log('Current video files:', currentVideoFiles);
+                    console.log('Saved video files:', savedVideoFiles);
+                    
+                    // Compare arrays
+                    const filesMatch = currentVideoFiles.length === savedVideoFiles.length && 
+                                     currentVideoFiles.every((file, index) => file === savedVideoFiles[index]);
+                    
+                    if (filesMatch) {
+                        // Files match, merge saved tags and presenters with current files
+                        this.toastmaster = state.toastmaster || null;
+                        this.presenters = state.presenters || [];
+                        
+                        // Merge tags from saved state into current files
+                        if (state.analyzedFiles && state.analyzedFiles.length > 0) {
+                            state.analyzedFiles.forEach((savedFile, savedFileIndex) => {
+                                const currentFile = this.analyzedFiles.find(f => f.filename === savedFile.filename);
+                                if (currentFile && savedFile.applause_segments) {
+                                    savedFile.applause_segments.forEach((savedSegment, savedSegmentIndex) => {
+                                        if (currentFile.applause_segments[savedSegmentIndex]) {
+                                            // Merge tags, but only keep tags that are still in the presenters list
+                                            if (savedSegment.tags && savedSegment.tags.length > 0) {
+                                                if (!currentFile.applause_segments[savedSegmentIndex].tags) {
+                                                    currentFile.applause_segments[savedSegmentIndex].tags = [];
+                                                }
+                                                // Filter out tags that are no longer in the presenters list
+                                                const validTags = savedSegment.tags.filter(tag => 
+                                                    this.presenters.some(p => p.presenter === tag)
+                                                );
+                                                currentFile.applause_segments[savedSegmentIndex].tags = validTags;
+                                            }
+                                        }
+                                    });
+                                }
+                            });
+                        }
+                        
+                        console.log('State loaded from localStorage (files match)');
+                        
+                        return true;
+                    } else {
+                        console.log('Video files have changed, clearing state');
+                        this.clearState();
+                        return false;
+                    }
                 } else {
-                    console.log('State cookie is too old, ignoring');
+                    console.log('State is too old, ignoring');
                     this.clearState();
+                }
+            } else {
+                console.log('No state found in localStorage');
+                console.log('Available localStorage keys:', Object.keys(localStorage));
+                
+                // Fallback to cookie (with same file checking logic)
+                const cookies = document.cookie.split(';');
+                const stateCookie = cookies.find(cookie => cookie.trim().startsWith(`${this.stateCookieName}=`));
+                
+                if (stateCookie) {
+                    const cookieStateJson = decodeURIComponent(stateCookie.split('=')[1]);
+                    const state = JSON.parse(cookieStateJson);
+                    
+                    // Check if the state is recent (within last 7 days)
+                    const stateDate = new Date(state.timestamp);
+                    const now = new Date();
+                    const daysDiff = (now - stateDate) / (1000 * 60 * 60 * 24);
+                    
+                    if (daysDiff <= 7) {
+                        // Check if current video files match saved video files
+                        const currentVideoFiles = this.analyzedFiles ? this.analyzedFiles.map(file => file.filename).sort() : [];
+                        const savedVideoFiles = state.videoFiles || [];
+                        
+                        console.log('Current video files:', currentVideoFiles);
+                        console.log('Saved video files:', savedVideoFiles);
+                        
+                        // Compare arrays
+                        const filesMatch = currentVideoFiles.length === savedVideoFiles.length && 
+                                         currentVideoFiles.every((file, index) => file === savedVideoFiles[index]);
+                        
+                        if (filesMatch) {
+                            // Files match, merge saved tags and presenters with current files
+                            this.toastmaster = state.toastmaster || null;
+                            this.presenters = state.presenters || [];
+                            
+                            // Merge tags from saved state into current files
+                            if (state.analyzedFiles && state.analyzedFiles.length > 0) {
+                                state.analyzedFiles.forEach((savedFile, savedFileIndex) => {
+                                    const currentFile = this.analyzedFiles.find(f => f.filename === savedFile.filename);
+                                    if (currentFile && savedFile.applause_segments) {
+                                        savedFile.applause_segments.forEach((savedSegment, savedSegmentIndex) => {
+                                            if (currentFile.applause_segments[savedSegmentIndex]) {
+                                                // Merge tags, but only keep tags that are still in the presenters list
+                                                if (savedSegment.tags && savedSegment.tags.length > 0) {
+                                                    if (!currentFile.applause_segments[savedSegmentIndex].tags) {
+                                                        currentFile.applause_segments[savedSegmentIndex].tags = [];
+                                                    }
+                                                    // Filter out tags that are no longer in the presenters list
+                                                    const validTags = savedSegment.tags.filter(tag => 
+                                                        this.presenters.some(p => p.presenter === tag)
+                                                    );
+                                                    currentFile.applause_segments[savedSegmentIndex].tags = validTags;
+                                                }
+                                            }
+                                        });
+                                    }
+                                });
+                            }
+                            
+                            console.log('State loaded from cookie (fallback, files match)');
+                            
+                            return true;
+                        } else {
+                            console.log('Video files have changed, clearing state');
+                            this.clearState();
+                            return false;
+                        }
+                    } else {
+                        console.log('State cookie is too old, ignoring');
+                        this.clearState();
+                    }
+                } else {
+                    console.log('No state cookie found');
                 }
             }
         } catch (error) {
@@ -1556,34 +1800,43 @@ echo "Extracted: ${item.outputName}"
     }
     
     clearState() {
+        // Clear localStorage
+        localStorage.removeItem(this.stateCookieName);
+        
+        // Clear cookie
         document.cookie = `${this.stateCookieName}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
-        console.log('State cookie cleared');
+        
+        console.log('State cleared from localStorage and cookie');
     }
     
-    // Modified loadAnalyzedFiles to check for saved state first
+    // Modified loadAnalyzedFiles to load files first, then check state
     async loadAnalyzedFiles() {
-        // Try to load saved state first
-        const stateLoaded = this.loadState();
-        
-        if (stateLoaded) {
-            // Use saved state
-            this.renderFileList();
-            this.updateSplitButton();
-            return;
-        }
-        
-        // Fall back to loading from server
+        // First, load files from server
         try {
             const response = await fetch('/api/analyzed-files');
             if (!response.ok) {
                 throw new Error('Failed to load analyzed files');
             }
             
-            this.analyzedFiles = await response.json();
-            this.renderFileList();
-            this.updateSplitButton();
+            const data = await response.json();
+            this.analyzedFiles = Array.isArray(data) ? data : [];
+            
+            // Now that we have the files, try to load saved state
+            const stateLoaded = this.loadState();
+            
+            if (stateLoaded) {
+                // Use saved state (which now includes the files with tags)
+                this.renderFileList();
+                this.renderPresenterTags(); // Render presenter tags from saved state
+                this.updateSplitButton();
+            } else {
+                // No saved state or files don't match, use fresh files
+                this.renderFileList();
+                this.updateSplitButton();
+            }
         } catch (error) {
             console.error('Error loading analyzed files:', error);
+            this.analyzedFiles = [];
             this.fileList.innerHTML = `
                 <div class="alert alert-warning">
                     <i class="fas fa-exclamation-triangle me-2"></i>

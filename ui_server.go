@@ -82,8 +82,31 @@ type Presenter struct {
 	DurationRed   string `json:"duration_red"`
 }
 
+func checkFFmpeg() error {
+	cmd := exec.Command("ffmpeg", "-version")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("FFmpeg not found: %v", err)
+	}
+
+	// Check if output contains version info
+	if !strings.Contains(string(output), "ffmpeg version") {
+		return fmt.Errorf("FFmpeg output doesn't contain version info")
+	}
+
+	return nil
+}
+
 func main() {
 	fmt.Println("=== SoundSplitter Starting ===")
+
+	// Check if FFmpeg is available
+	if err := checkFFmpeg(); err != nil {
+		fmt.Printf("Warning: FFmpeg not found or not working: %v\n", err)
+		fmt.Println("Video splitting will not work without FFmpeg installed.")
+	} else {
+		fmt.Println("FFmpeg is available and working.")
+	}
 
 	// Add a small delay to allow the process to stabilize
 	time.Sleep(100 * time.Millisecond)
@@ -454,6 +477,22 @@ func handleAnalyzedFiles(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		// Fix the filename to use the current app directory
+		// Extract the base filename from the original path
+		originalFilename := analysis.Filename
+		baseFilename := filepath.Base(originalFilename)
+
+		// Check if the file exists in the current app directory
+		currentPath := filepath.Join(appBaseDir, baseFilename)
+		if _, err := os.Stat(currentPath); err == nil {
+			// File exists in current directory, update the path
+			analysis.Filename = currentPath
+			log.Printf("Updated filename from %s to %s", originalFilename, currentPath)
+		} else {
+			// File doesn't exist in current directory, keep original path but log warning
+			log.Printf("Warning: Video file %s not found in current directory, using original path: %s", baseFilename, originalFilename)
+		}
+
 		// Set default selected state to true for all segments
 		for i := range analysis.Segments {
 			analysis.Segments[i].Selected = true
@@ -479,6 +518,8 @@ func handleSplitVideo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Printf("Split video request: %s -> %s (%.2f to %.2f)\n", req.Filename, req.OutputFilename, req.StartTime, req.EndTime)
+
 	// Use the provided output filename or create a default one
 	outputFile := req.OutputFilename
 	if outputFile == "" {
@@ -499,9 +540,17 @@ func handleSplitVideo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := SplitResponse{
-		OutputFile: outputFile,
+		OutputFile: filepath.Join("extracted", outputFile),
 		Success:    true,
 	}
+
+	// Get absolute path for debugging
+	absPath, err := filepath.Abs(response.OutputFile)
+	if err != nil {
+		absPath = response.OutputFile // fallback to relative path
+	}
+
+	fmt.Printf("Returning success response: %s (absolute: %s)\n", response.OutputFile, absPath)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
@@ -752,19 +801,43 @@ func extractPresenterFromLine(line string, boundaries map[string]int) string {
 }
 
 func extractVideoSegment(inputFile, outputFile string, startTime, endTime float64) error {
+	// Get current working directory
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "unknown"
+	}
+	fmt.Printf("Current working directory: %s\n", cwd)
+
+	// Change to the directory where the video files are located
+	videoDir := filepath.Dir(inputFile)
+	if err := os.Chdir(videoDir); err != nil {
+		return fmt.Errorf("failed to change to video directory %s: %v", videoDir, err)
+	}
+	fmt.Printf("Changed to video directory: %s\n", videoDir)
+
 	// Create extracted directory if it doesn't exist
 	extractedDir := "extracted"
 	if err := os.MkdirAll(extractedDir, 0755); err != nil {
 		return fmt.Errorf("failed to create extracted directory: %v", err)
 	}
 
+	// Get absolute path of extracted directory
+	absExtractedDir, err := filepath.Abs(extractedDir)
+	if err != nil {
+		absExtractedDir = extractedDir
+	}
+	fmt.Printf("Extracted directory: %s (absolute: %s)\n", extractedDir, absExtractedDir)
+
 	// Use FFmpeg to extract the video segment
 	duration := endTime - startTime
 
 	outputPath := filepath.Join(extractedDir, outputFile)
 
+	// Use just the filename for input since we've changed to the video directory
+	inputFilename := filepath.Base(inputFile)
+
 	cmd := exec.Command("ffmpeg",
-		"-i", inputFile,
+		"-i", inputFilename,
 		"-ss", fmt.Sprintf("%.2f", startTime),
 		"-t", fmt.Sprintf("%.2f", duration),
 		"-c", "copy", // Copy streams without re-encoding for speed
@@ -777,6 +850,18 @@ func extractVideoSegment(inputFile, outputFile string, startTime, endTime float6
 		return fmt.Errorf("FFmpeg error: %v, output: %s", err, string(output))
 	}
 
+	// Verify the file was actually created
+	if _, err := os.Stat(outputPath); os.IsNotExist(err) {
+		return fmt.Errorf("FFmpeg completed but output file was not created: %s", outputPath)
+	}
+
+	// Get absolute path for debugging
+	absPath, err := filepath.Abs(outputPath)
+	if err != nil {
+		absPath = outputPath // fallback to relative path
+	}
+
+	fmt.Printf("Successfully created video segment: %s\n", absPath)
 	return nil
 }
 
