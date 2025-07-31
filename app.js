@@ -474,9 +474,58 @@ class SoundSplitterUI {
         `;
     }
 
+    calculateSpeakingDuration(segment, filename, index) {
+        const file = this.analyzedFiles.find(f => f.filename === filename);
+        if (!file || !file.applause_segments) return segment.duration;
+        
+        const segments = file.applause_segments;
+        
+        // Get all applause boundaries (start and end times of applause segments)
+        const boundaries = [];
+        segments.forEach(seg => {
+            boundaries.push(this.parseTime(seg.start_time));
+            boundaries.push(this.parseTime(seg.end_time));
+        });
+        
+        // Add video start (0:00) if not already present
+        if (boundaries.length === 0 || boundaries[0] > 0) {
+            boundaries.unshift(0);
+        }
+        
+        // Sort boundaries and remove duplicates
+        const uniqueBoundaries = [...new Set(boundaries)].sort((a, b) => a - b);
+        
+        // Find the speaking segment that corresponds to this applause segment
+        // The speaking segment starts at the previous boundary and ends at the next boundary
+        const applauseStart = this.parseTime(segment.start_time);
+        const applauseEnd = this.parseTime(segment.end_time);
+        
+        // Find the speaking start (previous boundary or 0:00)
+        let speakingStart = 0;
+        for (let i = 0; i < uniqueBoundaries.length; i++) {
+            if (uniqueBoundaries[i] >= applauseStart) {
+                speakingStart = i > 0 ? uniqueBoundaries[i-1] : 0;
+                break;
+            }
+        }
+        
+        // Find the speaking end (next boundary or end of video)
+        let speakingEnd = uniqueBoundaries[uniqueBoundaries.length - 1];
+        for (let i = 0; i < uniqueBoundaries.length; i++) {
+            if (uniqueBoundaries[i] > applauseEnd) {
+                speakingEnd = uniqueBoundaries[i];
+                break;
+            }
+        }
+        
+        const speakingDuration = speakingEnd - speakingStart;
+        return this.formatTime(speakingDuration);
+    }
+
     renderSegmentItem(segment, filename, index) {
         const confidenceClass = this.getConfidenceClass(segment.confidence);
         const isChecked = segment.selected === true; // Only true if explicitly set to true
+        const speakingDuration = this.calculateSpeakingDuration(segment, filename, index);
         
         return `
             <div class="segment-item p-3 border-bottom" 
@@ -489,22 +538,19 @@ class SoundSplitterUI {
                                    ${isChecked ? 'checked' : ''}
                                    onclick="event.stopPropagation(); app.splitterUI.toggleSegment('${filename}', ${index}, this.checked)">
                             <div>
-                                <div class="fw-bold">
+                                <div class="fw-bold d-flex align-items-center flex-wrap">
                                     <span class="editable-time" data-type="start" data-filename="${filename}" data-index="${index}">${segment.start_time}</span> - 
                                     <span class="editable-time" data-type="end" data-filename="${filename}" data-index="${index}">${segment.end_time}</span>
-                                    <span class="badge bg-secondary ms-2">${segment.duration}</span>
-                                </div>
-                                <small class="text-muted">
-                                    Confidence: <span class="${confidenceClass}">${(segment.confidence * 100).toFixed(0)}%</span>
-                                </small>
-                                <div class="tags-container mt-1" data-filename="${filename}" data-index="${index}">
-                                    ${(segment.tags || []).map(tag => `
-                                        <span class="badge bg-primary me-1" draggable="true" data-tag="${tag}" 
-                                              ondblclick="event.stopPropagation(); app.splitterUI.editCustomTag('${filename}', ${index}, '${tag}')">
-                                            ${tag.startsWith('Custom:') ? tag : tag} 
-                                            <i class="fas fa-times ms-1" onclick="event.stopPropagation(); app.splitterUI.removeTag('${filename}', ${index}, '${tag}')"></i>
-                                        </span>
-                                    `).join('')}
+                                    <span class="badge bg-secondary ms-2">${speakingDuration}</span>
+                                    <div class="tags-container ms-2" data-filename="${filename}" data-index="${index}">
+                                        ${(segment.tags || []).map(tag => `
+                                            <span class="badge bg-primary me-1" draggable="true" data-tag="${tag}" 
+                                                  ondblclick="event.stopPropagation(); app.splitterUI.editCustomTag('${filename}', ${index}, '${tag}')">
+                                                ${tag.startsWith('Custom:') ? tag : tag} 
+                                                <i class="fas fa-times ms-1" onclick="event.stopPropagation(); app.splitterUI.removeTag('${filename}', ${index}, '${tag}')"></i>
+                                            </span>
+                                        `).join('')}
+                                    </div>
                                 </div>
                             </div>
                         </div>
