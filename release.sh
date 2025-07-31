@@ -1,9 +1,9 @@
 #!/bin/bash
 
-VERSION="0.0.2"
+VERSION="0.0.4"
 TAG="v$VERSION"
 RELEASE_TITLE="Release $VERSION"
-RELEASE_BODY="Bug fixes, polish, and tweaks for v$VERSION."
+RELEASE_BODY="Add dynamic audio to a process_videos.sh for version $VERSION."
 
 # Optional: confirm current branch is main or tag source
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
