@@ -288,13 +288,16 @@ convert_mov_to_mp4() {
         return 1
     fi
     
-    # Use FFmpeg with H.265 encoding and dynamic audio normalization
+    # Use FFmpeg with QuickTime-compatible H.265 encoding and dynamic audio normalization
     local ffmpeg_cmd=(
         ffmpeg -y -hwaccel videotoolbox
         -i "$input_file"
         -c:v hevc_videotoolbox
+        -profile:v main10 -level 4.1
+        -pix_fmt yuv420p10le
         -b:v "${BITRATE}k" -maxrate "${BITRATE}k" -bufsize "$((BITRATE * 2))k"
-        -profile:v main -level 4.1
+        -tag:v hvc1
+        -movflags +faststart
         -af "$DYNAUDNORM_SETTINGS"
         -c:a aac -b:a 163k
         "$output_file"
@@ -531,15 +534,18 @@ join_video_files_with_fades() {
     done
     filter_complex="$filter_complex concat=n=${#input_files[@]}:v=1:a=1[outv][outa]"
     
-    # Build FFmpeg command with same compression settings as HandBrake conversion
+    # Build FFmpeg command with QuickTime-compatible H.265 settings
     local ffmpeg_cmd=(
         ffmpeg -y -hwaccel videotoolbox
         "${input_args[@]}"
         -filter_complex "$filter_complex"
         -map "[outv]" -map "[outa]"
         -c:v hevc_videotoolbox
+        -profile:v main10 -level 4.1
+        -pix_fmt yuv420p10le
         -b:v "${BITRATE}k" -maxrate "${BITRATE}k" -bufsize "$((BITRATE * 2))k"
-        -profile:v main -level 4.1
+        -tag:v hvc1
+        -movflags +faststart
         -c:a aac -b:a 163k
         "$output_file"
     )
@@ -705,13 +711,16 @@ recompress_joined_files() {
             continue
         fi
         
-        # Use FFmpeg to compress the joined file
+        # Use FFmpeg to compress the joined file with QuickTime compatibility
         local recompress_cmd=(
             ffmpeg -y -hwaccel videotoolbox
             -i "$output_file"
             -c:v hevc_videotoolbox
+            -profile:v main10 -level 4.1
+            -pix_fmt yuv420p10le
             -b:v "${BITRATE}k" -maxrate "${BITRATE}k" -bufsize "$((BITRATE * 2))k"
-            -profile:v main -level 4.1
+            -tag:v hvc1
+            -movflags +faststart
             -af "$DYNAUDNORM_SETTINGS"
             -c:a aac -b:a 163k
             "$temp_file"
